@@ -5,10 +5,18 @@
   "type": "module",
   "directus:extension": {
     "type": "bundle",
-    "path": "dist/index.js",
+    "path": { "app": "dist/app.js", "api": "dist/api.js" },
     "entries": [
-      { "type": "operation", "name": "sms-aws-sns", "source": "src/operation/index.ts" },
-      { "type": "hook", "name": "sms-aws-sns-bootstrap", "source": "src/hook/index.ts" }
+      {
+        "type": "operation",
+        "name": "sms-aws-sns",
+        "source": { "app": "src/operation/app.ts", "api": "src/operation/api.ts" }
+      },
+      {
+        "type": "hook",
+        "name": "sms-aws-sns-bootstrap",
+        "source": "src/hook/index.ts"
+      }
     ],
     "host": "^10.0.0 || ^11.0.0"
   },
