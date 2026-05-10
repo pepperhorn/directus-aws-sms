@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Directus operation extension `directus-extension-operation-sms-aws-sns` that publishes a single SMS via AWS SNS, modeled on the built-in email send operation.
+**Goal:** Build a Directus bundle extension `directus-extension-operation-sms-aws-sns` that publishes a single SMS via AWS SNS. Ships an operation (panel UI + handler) and a hook that auto-creates an `sms_settings` singleton collection so admins can configure AWS credentials in the UI as an alternative to env vars.
 
-**Architecture:** Two-file Directus operation extension (`app.ts` for the panel UI, `api.ts` for the handler). Handler validates E.164 phone format, appends a `\n\n(do not reply)` footer, calls `SNSClient.send(PublishCommand)`, and returns `{ messageId, to }` to the data chain. Credentials come from environment via the AWS SDK's default credential chain.
+**Architecture:** Directus bundle with two entries — an operation (`operation/app.ts` + `operation/api.ts`) and a hook (`hook/index.ts`). Shared modules: `constants.ts` for `FOOTER` / `E164_REGEX` / `SETTINGS_COLLECTION`, and `config.ts` for `resolveAwsConfig` (env → settings collection fallback). Handler validates, resolves config, appends `\n\n(do not reply)` footer, calls `SNSClient.send(PublishCommand)`, returns `{ messageId, to }`.
 
-**Tech Stack:** TypeScript, `@directus/extensions-sdk` (build + typings), `@aws-sdk/client-sns` v3, `vitest`, `aws-sdk-client-mock`.
+**Tech Stack:** TypeScript, `@directus/extensions-sdk`, `@aws-sdk/client-sns` v3, `vitest`, `aws-sdk-client-mock`.
 
 **Spec:** `docs/superpowers/specs/2026-05-10-sms-aws-sns-operation-design.md`
 
@@ -18,28 +18,36 @@ All paths relative to project root `/home/shaun/sms-interface/`.
 
 ```
 directus-extension-operation-sms-aws-sns/
-├── package.json                # Extension metadata, deps, build scripts
-├── tsconfig.json               # TS config (extends extension-sdk default)
-├── vitest.config.ts            # Test runner config
-├── .gitignore                  # node_modules, dist
-├── README.md                   # Install + env vars + usage
+├── package.json                  # Bundle extension metadata
+├── tsconfig.json
+├── vitest.config.ts
+├── .gitignore
+├── README.md
 └── src/
-    ├── index.ts                # Default export combining app + api
-    ├── app.ts                  # Panel UI: id, name, icon, options, overview
-    ├── api.ts                  # Handler: validate, append footer, call SNS
-    ├── api.test.ts             # Unit tests for handler (mocked SNS)
-    └── constants.ts            # FOOTER constant + E.164 regex
+    ├── index.ts                  # Bundle entry — combines operation + hook
+    ├── constants.ts              # FOOTER, E164_REGEX, SETTINGS_COLLECTION
+    ├── constants.test.ts
+    ├── config.ts                 # resolveAwsConfig({ env, services, getSchema, accountability })
+    ├── config.test.ts
+    ├── operation/
+    │   ├── app.ts                # Panel UI (To, Message, SMS Type)
+    │   ├── api.ts                # Handler
+    │   └── api.test.ts
+    └── hook/
+        └── index.ts              # init.before hook: ensure sms_settings exists
 ```
 
 Responsibility split:
-- `constants.ts` — pure values, imported by `api.ts` and tests. Keeps the regex and footer string in one place.
-- `app.ts` — declarative UI definition only, no logic.
-- `api.ts` — runtime logic only (validation, SNS call, error handling).
-- `index.ts` — assembly; minimal.
+- `constants.ts` — pure values shared everywhere.
+- `config.ts` — pure resolver, no AWS or SNS knowledge.
+- `operation/api.ts` — validation, config resolution, SNS call.
+- `operation/app.ts` — declarative UI only.
+- `hook/index.ts` — collection bootstrap on startup, idempotent.
+- `index.ts` — bundle assembly.
 
 ---
 
-## Task 1: Initialize the extension package
+## Task 1: Initialize the bundle package
 
 **Files:**
 - Create: `directus-extension-operation-sms-aws-sns/package.json`
@@ -50,8 +58,8 @@ Responsibility split:
 
 Run:
 ```bash
-mkdir -p /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns/src
-cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
+mkdir -p /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns/src/operation
+mkdir -p /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns/src/hook
 ```
 
 - [ ] **Step 2: Write `package.json`**
@@ -62,18 +70,15 @@ Create `directus-extension-operation-sms-aws-sns/package.json`:
 {
   "name": "directus-extension-operation-sms-aws-sns",
   "version": "0.1.0",
-  "description": "Directus flow operation that sends SMS via AWS SNS.",
+  "description": "Directus bundle: flow operation that sends SMS via AWS SNS, with an auto-created settings collection.",
   "type": "module",
   "directus:extension": {
-    "type": "operation",
-    "path": {
-      "app": "dist/app.js",
-      "api": "dist/api.js"
-    },
-    "source": {
-      "app": "src/app.ts",
-      "api": "src/api.ts"
-    },
+    "type": "bundle",
+    "path": "dist/index.js",
+    "entries": [
+      { "type": "operation", "name": "sms-aws-sns", "source": "src/operation/index.ts" },
+      { "type": "hook", "name": "sms-aws-sns-bootstrap", "source": "src/hook/index.ts" }
+    ],
     "host": "^10.0.0 || ^11.0.0"
   },
   "scripts": {
@@ -95,6 +100,8 @@ Create `directus-extension-operation-sms-aws-sns/package.json`:
   }
 }
 ```
+
+Note: the operation entry's `source` is `src/operation/index.ts`. We'll create that as a thin re-export combining `app.ts` + `api.ts`.
 
 - [ ] **Step 3: Write `tsconfig.json`**
 
@@ -143,9 +150,8 @@ Expected: `node_modules/` populated, `package-lock.json` created, no errors.
 
 ```bash
 cd /home/shaun/sms-interface
-git init -q 2>/dev/null || true
 git add directus-extension-operation-sms-aws-sns/package.json directus-extension-operation-sms-aws-sns/tsconfig.json directus-extension-operation-sms-aws-sns/.gitignore directus-extension-operation-sms-aws-sns/package-lock.json
-git commit -m "chore: scaffold directus-extension-operation-sms-aws-sns package"
+git commit -m "chore(sms): scaffold bundle extension package"
 ```
 
 ---
@@ -176,7 +182,7 @@ Create `directus-extension-operation-sms-aws-sns/src/constants.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { FOOTER, E164_REGEX } from "./constants.js";
+import { FOOTER, E164_REGEX, SETTINGS_COLLECTION } from "./constants.js";
 
 describe("FOOTER", () => {
   it("is exactly the no-reply footer with two leading newlines", () => {
@@ -217,6 +223,12 @@ describe("E164_REGEX", () => {
     expect(E164_REGEX.test("+12345678901234567")).toBe(false);
   });
 });
+
+describe("SETTINGS_COLLECTION", () => {
+  it("is the singleton collection name", () => {
+    expect(SETTINGS_COLLECTION).toBe("sms_settings");
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -237,6 +249,8 @@ Create `directus-extension-operation-sms-aws-sns/src/constants.ts`:
 export const FOOTER = "\n\n(do not reply)";
 
 export const E164_REGEX = /^\+[1-9]\d{1,14}$/;
+
+export const SETTINGS_COLLECTION = "sms_settings";
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -247,49 +261,374 @@ cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
 npx vitest run src/constants.test.ts
 ```
 
-Expected: PASS — 9 tests pass.
+Expected: PASS — 10 tests pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /home/shaun/sms-interface
 git add directus-extension-operation-sms-aws-sns/src/constants.ts directus-extension-operation-sms-aws-sns/src/constants.test.ts directus-extension-operation-sms-aws-sns/vitest.config.ts
-git commit -m "feat(sms): add FOOTER constant and E164_REGEX with tests"
+git commit -m "feat(sms): add FOOTER, E164_REGEX, SETTINGS_COLLECTION constants"
 ```
 
 ---
 
-## Task 3: Implement the handler — validation + missing-region error
+## Task 3: Implement `resolveAwsConfig` (hybrid env + settings)
 
 **Files:**
-- Create: `directus-extension-operation-sms-aws-sns/src/api.ts`
-- Create: `directus-extension-operation-sms-aws-sns/src/api.test.ts`
+- Create: `directus-extension-operation-sms-aws-sns/src/config.ts`
+- Create: `directus-extension-operation-sms-aws-sns/src/config.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Create `directus-extension-operation-sms-aws-sns/src/api.test.ts`:
+Create `directus-extension-operation-sms-aws-sns/src/config.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { resolveAwsConfig } from "./config.js";
+import { SETTINGS_COLLECTION } from "./constants.js";
+
+type Env = Record<string, string | undefined>;
+
+const buildContext = (
+  env: Env,
+  settingsRow: Record<string, string | null> | null,
+  readSingletonImpl?: () => Promise<unknown>
+) => {
+  const readSingleton = vi.fn(
+    readSingletonImpl ?? (async () => settingsRow ?? {})
+  );
+
+  class FakeItemsService {
+    constructor(public collection: string, public _opts: unknown) {}
+    readSingleton = readSingleton;
+  }
+
+  const services = { ItemsService: FakeItemsService } as any;
+  const getSchema = vi.fn(async () => ({}));
+  const accountability = null;
+
+  return { env, services, getSchema, accountability, readSingleton };
+};
+
+describe("resolveAwsConfig", () => {
+  it("returns env values when all set; never reads settings", async () => {
+    const { env, services, getSchema, accountability, readSingleton } =
+      buildContext(
+        {
+          AWS_REGION: "us-east-1",
+          AWS_ACCESS_KEY_ID: "AKIA",
+          AWS_SECRET_ACCESS_KEY: "shh",
+          AWS_SNS_SENDER_ID: "BRAND",
+        },
+        null
+      );
+
+    const result = await resolveAwsConfig({
+      env,
+      services,
+      getSchema,
+      accountability,
+    });
+
+    expect(result).toEqual({
+      region: "us-east-1",
+      accessKeyId: "AKIA",
+      secretAccessKey: "shh",
+      senderId: "BRAND",
+    });
+    expect(readSingleton).not.toHaveBeenCalled();
+  });
+
+  it("falls back to settings when env is empty", async () => {
+    const { env, services, getSchema, accountability } = buildContext({}, {
+      aws_region: "eu-west-1",
+      aws_access_key_id: "AKIA_DB",
+      aws_secret_access_key: "secret_db",
+      aws_sns_sender_id: "BRAND_DB",
+    });
+
+    const result = await resolveAwsConfig({
+      env,
+      services,
+      getSchema,
+      accountability,
+    });
+
+    expect(result).toEqual({
+      region: "eu-west-1",
+      accessKeyId: "AKIA_DB",
+      secretAccessKey: "secret_db",
+      senderId: "BRAND_DB",
+    });
+  });
+
+  it("mixes sources: env wins per-key", async () => {
+    const { env, services, getSchema, accountability } = buildContext(
+      { AWS_REGION: "ap-south-1" },
+      {
+        aws_region: "us-east-1",
+        aws_access_key_id: "AKIA_DB",
+        aws_secret_access_key: "secret_db",
+        aws_sns_sender_id: null,
+      }
+    );
+
+    const result = await resolveAwsConfig({
+      env,
+      services,
+      getSchema,
+      accountability,
+    });
+
+    expect(result.region).toBe("ap-south-1");
+    expect(result.accessKeyId).toBe("AKIA_DB");
+    expect(result.secretAccessKey).toBe("secret_db");
+    expect(result.senderId).toBeUndefined();
+  });
+
+  it("throws when region is missing from both sources", async () => {
+    const { env, services, getSchema, accountability } = buildContext({}, {
+      aws_region: "",
+      aws_access_key_id: "AKIA_DB",
+      aws_secret_access_key: "secret_db",
+      aws_sns_sender_id: null,
+    });
+
+    await expect(
+      resolveAwsConfig({ env, services, getSchema, accountability })
+    ).rejects.toThrow(
+      /AWS region not configured\. Set AWS_REGION env var or configure SMS Settings\./
+    );
+  });
+
+  it("treats whitespace-only env values as unset", async () => {
+    const { env, services, getSchema, accountability } = buildContext(
+      { AWS_REGION: "   " },
+      { aws_region: "eu-west-1" }
+    );
+
+    const result = await resolveAwsConfig({
+      env,
+      services,
+      getSchema,
+      accountability,
+    });
+
+    expect(result.region).toBe("eu-west-1");
+  });
+
+  it("handles empty settings record (no fields populated)", async () => {
+    const { env, services, getSchema, accountability } = buildContext(
+      { AWS_REGION: "us-east-1" },
+      {}
+    );
+
+    const result = await resolveAwsConfig({
+      env,
+      services,
+      getSchema,
+      accountability,
+    });
+
+    expect(result.region).toBe("us-east-1");
+    expect(result.accessKeyId).toBeUndefined();
+    expect(result.secretAccessKey).toBeUndefined();
+    expect(result.senderId).toBeUndefined();
+  });
+
+  it("propagates ItemsService errors with context", async () => {
+    const { env, services, getSchema, accountability } = buildContext(
+      {},
+      null,
+      async () => {
+        throw new Error("DB connection refused");
+      }
+    );
+
+    await expect(
+      resolveAwsConfig({ env, services, getSchema, accountability })
+    ).rejects.toThrow(/Failed to read sms_settings.*DB connection refused/);
+  });
+
+  it("constructs ItemsService with the right collection name", async () => {
+    let capturedCollection = "";
+    class CaptureItemsService {
+      constructor(public collection: string, public _opts: unknown) {
+        capturedCollection = collection;
+      }
+      readSingleton = async () => ({ aws_region: "us-east-1" });
+    }
+    const services = { ItemsService: CaptureItemsService } as any;
+
+    await resolveAwsConfig({
+      env: {},
+      services,
+      getSchema: async () => ({}) as any,
+      accountability: null,
+    });
+
+    expect(capturedCollection).toBe(SETTINGS_COLLECTION);
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run:
+```bash
+cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
+npx vitest run src/config.test.ts
+```
+
+Expected: FAIL — module `./config.js` cannot be resolved.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `directus-extension-operation-sms-aws-sns/src/config.ts`:
+
+```ts
+import { SETTINGS_COLLECTION } from "./constants.js";
+
+export type AwsConfig = {
+  region: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  senderId?: string;
+};
+
+type ResolveContext = {
+  env: Record<string, string | undefined>;
+  services: { ItemsService: new (collection: string, opts: unknown) => { readSingleton: (query?: unknown) => Promise<Record<string, unknown>> } };
+  getSchema: () => Promise<unknown>;
+  accountability: unknown;
+};
+
+const trimOrUndefined = (v: unknown): string | undefined => {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t.length === 0 ? undefined : t;
+};
+
+export const resolveAwsConfig = async (
+  ctx: ResolveContext
+): Promise<AwsConfig> => {
+  const fromEnv = {
+    region: trimOrUndefined(ctx.env.AWS_REGION),
+    accessKeyId: trimOrUndefined(ctx.env.AWS_ACCESS_KEY_ID),
+    secretAccessKey: trimOrUndefined(ctx.env.AWS_SECRET_ACCESS_KEY),
+    senderId: trimOrUndefined(ctx.env.AWS_SNS_SENDER_ID),
+  };
+
+  const allEnvSet =
+    fromEnv.region &&
+    fromEnv.accessKeyId &&
+    fromEnv.secretAccessKey &&
+    fromEnv.senderId;
+
+  let fromSettings: {
+    region?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    senderId?: string;
+  } = {};
+
+  if (!allEnvSet) {
+    try {
+      const schema = await ctx.getSchema();
+      const items = new ctx.services.ItemsService(SETTINGS_COLLECTION, {
+        schema,
+        accountability: ctx.accountability,
+      });
+      const row = (await items.readSingleton({})) ?? {};
+      fromSettings = {
+        region: trimOrUndefined((row as any).aws_region),
+        accessKeyId: trimOrUndefined((row as any).aws_access_key_id),
+        secretAccessKey: trimOrUndefined((row as any).aws_secret_access_key),
+        senderId: trimOrUndefined((row as any).aws_sns_sender_id),
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to read sms_settings: ${msg}`);
+    }
+  }
+
+  const region = fromEnv.region ?? fromSettings.region;
+  if (!region) {
+    throw new Error(
+      "AWS region not configured. Set AWS_REGION env var or configure SMS Settings."
+    );
+  }
+
+  return {
+    region,
+    accessKeyId: fromEnv.accessKeyId ?? fromSettings.accessKeyId,
+    secretAccessKey: fromEnv.secretAccessKey ?? fromSettings.secretAccessKey,
+    senderId: fromEnv.senderId ?? fromSettings.senderId,
+  };
+};
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run:
+```bash
+cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
+npx vitest run src/config.test.ts
+```
+
+Expected: PASS — 8 tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd /home/shaun/sms-interface
+git add directus-extension-operation-sms-aws-sns/src/config.ts directus-extension-operation-sms-aws-sns/src/config.test.ts
+git commit -m "feat(sms): add resolveAwsConfig with env + settings hybrid resolution"
+```
+
+---
+
+## Task 4: Operation handler — validation + missing region
+
+**Files:**
+- Create: `directus-extension-operation-sms-aws-sns/src/operation/api.ts`
+- Create: `directus-extension-operation-sms-aws-sns/src/operation/api.test.ts`
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `directus-extension-operation-sms-aws-sns/src/operation/api.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import operation from "./api.js";
 
 const snsMock = mockClient(SNSClient);
 
-const ctx = () => ({
-  env: {} as Record<string, string | undefined>,
+const makeServices = (settingsRow: Record<string, unknown> = {}) => {
+  const readSingleton = vi.fn(async () => settingsRow);
+  class FakeItemsService {
+    constructor(public collection: string, public _opts: unknown) {}
+    readSingleton = readSingleton;
+  }
+  return { ItemsService: FakeItemsService } as any;
+};
+
+const ctx = (overrides: Partial<{ env: Record<string, string | undefined>; settings: Record<string, unknown> }> = {}) => ({
+  env: overrides.env ?? {},
+  services: makeServices(overrides.settings ?? {}),
+  getSchema: async () => ({}) as any,
+  accountability: null,
+  data: {} as Record<string, unknown>,
+  database: {} as any,
   logger: {
     error: () => {},
     warn: () => {},
     info: () => {},
     debug: () => {},
   } as any,
-  data: {} as Record<string, unknown>,
-  database: {} as any,
-  accountability: null,
-  getSchema: async () => ({} as any),
-  services: {} as any,
 });
 
 describe("operation.handler validation", () => {
@@ -297,21 +636,8 @@ describe("operation.handler validation", () => {
     snsMock.reset();
   });
 
-  it("rejects when AWS_REGION is missing", async () => {
-    const c = ctx();
-    c.env = {};
-    await expect(
-      operation.handler(
-        { to: "+15551234567", message: "hi", smsType: "Transactional" },
-        c
-      )
-    ).rejects.toThrow(/AWS_REGION/);
-    expect(snsMock.commandCalls(PublishCommand)).toHaveLength(0);
-  });
-
-  it("rejects when phone is not E.164", async () => {
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+  it("rejects when phone is not E.164 (no AWS call, no config read)", async () => {
+    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
     await expect(
       operation.handler(
         { to: "5551234567", message: "hi", smsType: "Transactional" },
@@ -322,8 +648,7 @@ describe("operation.handler validation", () => {
   });
 
   it("rejects when message is empty", async () => {
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
     await expect(
       operation.handler(
         { to: "+15551234567", message: "   ", smsType: "Transactional" },
@@ -332,27 +657,39 @@ describe("operation.handler validation", () => {
     ).rejects.toThrow(/Message body is required/);
     expect(snsMock.commandCalls(PublishCommand)).toHaveLength(0);
   });
+
+  it("rejects when region is missing from env and settings", async () => {
+    const c = ctx({ env: {}, settings: {} });
+    await expect(
+      operation.handler(
+        { to: "+15551234567", message: "hi", smsType: "Transactional" },
+        c
+      )
+    ).rejects.toThrow(/AWS region not configured/);
+    expect(snsMock.commandCalls(PublishCommand)).toHaveLength(0);
+  });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run:
 ```bash
 cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
-npx vitest run src/api.test.ts
+npx vitest run src/operation/api.test.ts
 ```
 
 Expected: FAIL — module `./api.js` cannot be resolved.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `directus-extension-operation-sms-aws-sns/src/api.ts`:
+Create `directus-extension-operation-sms-aws-sns/src/operation/api.ts`:
 
 ```ts
 import { defineOperationApi } from "@directus/extensions-sdk";
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
-import { FOOTER, E164_REGEX } from "./constants.js";
+import { FOOTER, E164_REGEX } from "../constants.js";
+import { resolveAwsConfig } from "../config.js";
 
 export type Options = {
   to: string;
@@ -367,13 +704,10 @@ export type Result = {
 
 export default defineOperationApi<Options>({
   id: "sms-aws-sns",
-  handler: async ({ to, message, smsType }, { env, logger }) => {
-    if (!env.AWS_REGION) {
-      throw new Error(
-        "AWS_REGION is not set. Configure it in the Directus environment."
-      );
-    }
-
+  handler: async (
+    { to, message, smsType },
+    { env, services, getSchema, accountability, logger }
+  ) => {
     if (typeof to !== "string" || !E164_REGEX.test(to)) {
       throw new Error(
         "Invalid phone number: must be E.164 (e.g. +15551234567)"
@@ -383,6 +717,13 @@ export default defineOperationApi<Options>({
     if (typeof message !== "string" || message.trim().length === 0) {
       throw new Error("Message body is required");
     }
+
+    const config = await resolveAwsConfig({
+      env: env as Record<string, string | undefined>,
+      services,
+      getSchema,
+      accountability,
+    });
 
     const finalMessage = message + FOOTER;
 
@@ -396,14 +737,24 @@ export default defineOperationApi<Options>({
       },
     };
 
-    if (env.AWS_SNS_SENDER_ID) {
+    if (config.senderId) {
       messageAttributes["AWS.SNS.SMS.SenderID"] = {
         DataType: "String",
-        StringValue: String(env.AWS_SNS_SENDER_ID),
+        StringValue: config.senderId,
       };
     }
 
-    const client = new SNSClient({ region: String(env.AWS_REGION) });
+    const clientConfig: { region: string; credentials?: { accessKeyId: string; secretAccessKey: string } } = {
+      region: config.region,
+    };
+    if (config.accessKeyId && config.secretAccessKey) {
+      clientConfig.credentials = {
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      };
+    }
+
+    const client = new SNSClient(clientConfig);
 
     try {
       const result = await client.send(
@@ -416,19 +767,21 @@ export default defineOperationApi<Options>({
       return { messageId: result.MessageId ?? "", to } satisfies Result;
     } catch (err) {
       const e = err as { name?: string; message?: string };
-      logger.error(`SNS Publish failed: ${e.name ?? "Error"}: ${e.message ?? String(err)}`);
+      logger.error(
+        `SNS Publish failed: ${e.name ?? "Error"}: ${e.message ?? String(err)}`
+      );
       throw err;
     }
   },
 });
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
 Run:
 ```bash
 cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
-npx vitest run src/api.test.ts
+npx vitest run src/operation/api.test.ts
 ```
 
 Expected: PASS — 3 validation tests pass.
@@ -437,20 +790,20 @@ Expected: PASS — 3 validation tests pass.
 
 ```bash
 cd /home/shaun/sms-interface
-git add directus-extension-operation-sms-aws-sns/src/api.ts directus-extension-operation-sms-aws-sns/src/api.test.ts
-git commit -m "feat(sms): add operation handler with input validation"
+git add directus-extension-operation-sms-aws-sns/src/operation/api.ts directus-extension-operation-sms-aws-sns/src/operation/api.test.ts
+git commit -m "feat(sms): add operation handler with validation and config resolution"
 ```
 
 ---
 
-## Task 4: Handler success path + footer + SNS attributes
+## Task 5: Operation handler — success path, footer, attributes, errors
 
 **Files:**
-- Modify: `directus-extension-operation-sms-aws-sns/src/api.test.ts` (add tests, no new logic in api.ts)
+- Modify: `directus-extension-operation-sms-aws-sns/src/operation/api.test.ts`
 
 - [ ] **Step 1: Append the failing tests**
 
-Append to `directus-extension-operation-sms-aws-sns/src/api.test.ts` (inside the file, before the final closing — i.e. add these `describe` blocks after the existing `describe("operation.handler validation", ...)`):
+Append to `directus-extension-operation-sms-aws-sns/src/operation/api.test.ts` (after the existing `describe("operation.handler validation", ...)` block):
 
 ```ts
 describe("operation.handler success path", () => {
@@ -458,11 +811,16 @@ describe("operation.handler success path", () => {
     snsMock.reset();
   });
 
-  it("publishes with footer appended and returns messageId + to", async () => {
+  it("publishes with footer and returns messageId + to", async () => {
     snsMock.on(PublishCommand).resolves({ MessageId: "msg-abc-123" });
 
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+    const c = ctx({
+      env: {
+        AWS_REGION: "us-east-1",
+        AWS_ACCESS_KEY_ID: "AKIA",
+        AWS_SECRET_ACCESS_KEY: "shh",
+      },
+    });
 
     const result = await operation.handler(
       { to: "+15551234567", message: "Your code is 4815", smsType: "Transactional" },
@@ -476,29 +834,40 @@ describe("operation.handler success path", () => {
     const input = calls[0]!.args[0].input;
     expect(input.PhoneNumber).toBe("+15551234567");
     expect(input.Message).toBe("Your code is 4815\n\n(do not reply)");
-  });
-
-  it("sets SMSType=Transactional in MessageAttributes", async () => {
-    snsMock.on(PublishCommand).resolves({ MessageId: "id-1" });
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
-
-    await operation.handler(
-      { to: "+15551234567", message: "hi", smsType: "Transactional" },
-      c
-    );
-
-    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
     expect(input.MessageAttributes!["AWS.SNS.SMS.SMSType"]).toEqual({
       DataType: "String",
       StringValue: "Transactional",
     });
   });
 
-  it("sets SMSType=Promotional when chosen", async () => {
+  it("uses settings collection when env is empty", async () => {
+    snsMock.on(PublishCommand).resolves({ MessageId: "id-db" });
+    const c = ctx({
+      env: {},
+      settings: {
+        aws_region: "eu-west-1",
+        aws_access_key_id: "AKIA_DB",
+        aws_secret_access_key: "secret_db",
+        aws_sns_sender_id: "BRAND_DB",
+      },
+    });
+
+    const result = await operation.handler(
+      { to: "+447700900123", message: "hi", smsType: "Transactional" },
+      c
+    );
+
+    expect(result.messageId).toBe("id-db");
+    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
+    expect(input.MessageAttributes!["AWS.SNS.SMS.SenderID"]).toEqual({
+      DataType: "String",
+      StringValue: "BRAND_DB",
+    });
+  });
+
+  it("propagates Promotional smsType", async () => {
     snsMock.on(PublishCommand).resolves({ MessageId: "id-2" });
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
 
     await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Promotional" },
@@ -512,27 +881,9 @@ describe("operation.handler success path", () => {
     });
   });
 
-  it("includes SenderID when AWS_SNS_SENDER_ID is set", async () => {
+  it("omits SenderID when not configured anywhere", async () => {
     snsMock.on(PublishCommand).resolves({ MessageId: "id-3" });
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1", AWS_SNS_SENDER_ID: "MYBRAND" };
-
-    await operation.handler(
-      { to: "+15551234567", message: "hi", smsType: "Transactional" },
-      c
-    );
-
-    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
-    expect(input.MessageAttributes!["AWS.SNS.SMS.SenderID"]).toEqual({
-      DataType: "String",
-      StringValue: "MYBRAND",
-    });
-  });
-
-  it("omits SenderID when AWS_SNS_SENDER_ID is not set", async () => {
-    snsMock.on(PublishCommand).resolves({ MessageId: "id-4" });
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
 
     await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Transactional" },
@@ -545,8 +896,7 @@ describe("operation.handler success path", () => {
 
   it("returns empty messageId when SNS response omits MessageId", async () => {
     snsMock.on(PublishCommand).resolves({});
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
 
     const result = await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Transactional" },
@@ -569,8 +919,7 @@ describe("operation.handler error path", () => {
     snsMock.on(PublishCommand).rejects(snsErr);
 
     let logged = "";
-    const c = ctx();
-    c.env = { AWS_REGION: "us-east-1" };
+    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
     c.logger = {
       error: (msg: string) => {
         logged = msg;
@@ -593,34 +942,35 @@ describe("operation.handler error path", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify success-path tests pass and footer assertion holds**
+- [ ] **Step 2: Run all tests**
 
 Run:
 ```bash
 cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
-npx vitest run src/api.test.ts
+npx vitest run
 ```
 
-Expected: PASS — all tests pass (3 validation + 6 success + 1 error = 10 tests). The footer assertion (`Your code is 4815\n\n(do not reply)`) confirms `FOOTER` is appended correctly. No changes to `api.ts` needed; the tests verify behavior already implemented in Task 3.
+Expected: PASS — 10 constants + 8 config + 9 api = 27 tests.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 cd /home/shaun/sms-interface
-git add directus-extension-operation-sms-aws-sns/src/api.test.ts
-git commit -m "test(sms): cover footer, SMSType, sender ID, and SNS error path"
+git add directus-extension-operation-sms-aws-sns/src/operation/api.test.ts
+git commit -m "test(sms): cover footer, settings fallback, sender ID, error path"
 ```
 
 ---
 
-## Task 5: Add the panel UI definition
+## Task 6: Operation panel UI
 
 **Files:**
-- Create: `directus-extension-operation-sms-aws-sns/src/app.ts`
+- Create: `directus-extension-operation-sms-aws-sns/src/operation/app.ts`
+- Create: `directus-extension-operation-sms-aws-sns/src/operation/index.ts`
 
-- [ ] **Step 1: Write the UI definition**
+- [ ] **Step 1: Write the panel UI**
 
-Create `directus-extension-operation-sms-aws-sns/src/app.ts`:
+Create `directus-extension-operation-sms-aws-sns/src/operation/app.ts`:
 
 ```ts
 import { defineOperationApp } from "@directus/extensions-sdk";
@@ -631,13 +981,13 @@ export default defineOperationApp({
   icon: "sms",
   description: "Send a single SMS via AWS SNS. Appends a (do not reply) footer.",
   overview: ({ to, message }) => [
-    { label: "To", text: to ?? "" },
+    { label: "To", text: (to as string) ?? "" },
     {
       label: "Message",
       text:
         typeof message === "string" && message.length > 60
           ? message.slice(0, 60) + "…"
-          : (message as string) ?? "",
+          : ((message as string) ?? ""),
     },
   ],
   options: [
@@ -648,9 +998,7 @@ export default defineOperationApp({
       meta: {
         width: "full",
         interface: "input",
-        options: {
-          placeholder: "+15551234567",
-        },
+        options: { placeholder: "+15551234567" },
         required: true,
         note: "Recipient phone number in E.164 format. Supports {{ }} template variables.",
       },
@@ -666,16 +1014,14 @@ export default defineOperationApp({
           placeholder: "Your verification code is {{ trigger.payload.code }}",
         },
         required: true,
-        note: "SMS body. Supports {{ }} template variables. A `\\n\\n(do not reply)` footer is appended automatically.",
+        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically.",
       },
     },
     {
       field: "smsType",
       name: "SMS Type",
       type: "string",
-      schema: {
-        default_value: "Transactional",
-      },
+      schema: { default_value: "Transactional" },
       meta: {
         width: "half",
         interface: "select-dropdown",
@@ -688,6 +1034,135 @@ export default defineOperationApp({
       },
     },
   ],
+});
+```
+
+- [ ] **Step 2: Write the operation entry**
+
+Create `directus-extension-operation-sms-aws-sns/src/operation/index.ts`:
+
+```ts
+export { default as app } from "./app.js";
+export { default as api } from "./api.js";
+```
+
+- [ ] **Step 3: Type-check**
+
+Run:
+```bash
+cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
+npx tsc --noEmit
+```
+
+Expected: no errors.
+
+- [ ] **Step 4: Commit**
+
+```bash
+cd /home/shaun/sms-interface
+git add directus-extension-operation-sms-aws-sns/src/operation/app.ts directus-extension-operation-sms-aws-sns/src/operation/index.ts
+git commit -m "feat(sms): add operation panel UI and bundle entry"
+```
+
+---
+
+## Task 7: Bootstrap hook — auto-create `sms_settings`
+
+**Files:**
+- Create: `directus-extension-operation-sms-aws-sns/src/hook/index.ts`
+
+- [ ] **Step 1: Write the hook**
+
+Create `directus-extension-operation-sms-aws-sns/src/hook/index.ts`:
+
+```ts
+import { defineHook } from "@directus/extensions-sdk";
+import { SETTINGS_COLLECTION } from "../constants.js";
+
+export default defineHook(({ init }, { services, getSchema, logger, database }) => {
+  init("app.before", async () => {
+    try {
+      const schema = await getSchema();
+      const collections = (schema as any)?.collections ?? {};
+      if (collections[SETTINGS_COLLECTION]) {
+        return;
+      }
+
+      const { CollectionsService, ItemsService } = services as any;
+      const collectionsService = new CollectionsService({
+        schema,
+        knex: database,
+      });
+
+      await collectionsService.createOne({
+        collection: SETTINGS_COLLECTION,
+        meta: {
+          singleton: true,
+          icon: "sms",
+          note: "AWS SNS credentials used by the Send SMS operation. Env vars override these values.",
+        },
+        schema: { name: SETTINGS_COLLECTION },
+        fields: [
+          {
+            field: "id",
+            type: "integer",
+            meta: { hidden: true, interface: "input", readonly: true },
+            schema: { is_primary_key: true, has_auto_increment: true },
+          },
+          {
+            field: "aws_region",
+            type: "string",
+            meta: {
+              interface: "input",
+              width: "half",
+              note: "AWS region, e.g. us-east-1",
+            },
+            schema: { default_value: "us-east-1" },
+          },
+          {
+            field: "aws_access_key_id",
+            type: "string",
+            meta: {
+              interface: "input",
+              width: "half",
+              note: "Stored plaintext. Prefer AWS_ACCESS_KEY_ID env var in production.",
+            },
+          },
+          {
+            field: "aws_secret_access_key",
+            type: "string",
+            meta: {
+              interface: "input",
+              width: "full",
+              special: ["conceal"],
+              note: "Stored plaintext. Prefer AWS_SECRET_ACCESS_KEY env var in production.",
+            },
+          },
+          {
+            field: "aws_sns_sender_id",
+            type: "string",
+            meta: {
+              interface: "input",
+              width: "half",
+              note: "Optional alphanumeric Sender ID (where supported by destination country).",
+            },
+          },
+        ],
+      });
+
+      const freshSchema = await getSchema();
+      const items = new ItemsService(SETTINGS_COLLECTION, {
+        schema: freshSchema,
+        accountability: null,
+      });
+      await items.upsertSingleton({});
+
+      logger.info(`Created singleton collection "${SETTINGS_COLLECTION}".`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Failed to bootstrap ${SETTINGS_COLLECTION}: ${msg}`);
+    }
+  });
 });
 ```
 
@@ -705,17 +1180,18 @@ Expected: no errors.
 
 ```bash
 cd /home/shaun/sms-interface
-git add directus-extension-operation-sms-aws-sns/src/app.ts
-git commit -m "feat(sms): add operation panel UI with To, Message, SMS Type"
+git add directus-extension-operation-sms-aws-sns/src/hook/index.ts
+git commit -m "feat(sms): add bootstrap hook that auto-creates sms_settings"
 ```
+
+Note: the hook is intentionally not unit-tested. It depends on Directus's CollectionsService whose full surface is awkward to mock and whose behavior is verified by the manual E2E test (Task 9). This is documented as a deliberate trade-off, not an oversight.
 
 ---
 
-## Task 6: Build the extension
+## Task 8: Build the bundle
 
 **Files:**
-- Verify: `directus-extension-operation-sms-aws-sns/dist/app.js`
-- Verify: `directus-extension-operation-sms-aws-sns/dist/api.js`
+- Verify: `directus-extension-operation-sms-aws-sns/dist/index.js` exists
 
 - [ ] **Step 1: Run the build**
 
@@ -725,16 +1201,16 @@ cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
 npm run build
 ```
 
-Expected: build succeeds, `dist/app.js` and `dist/api.js` exist, no warnings about missing exports.
+Expected: build succeeds, `dist/index.js` exists, no warnings about missing exports.
 
-- [ ] **Step 2: Sanity-check build output exists**
+- [ ] **Step 2: Sanity-check build output**
 
 Run:
 ```bash
 ls -1 /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns/dist
 ```
 
-Expected: at minimum `app.js` and `api.js` listed.
+Expected: at minimum `index.js` listed.
 
 - [ ] **Step 3: Run the full test suite**
 
@@ -744,23 +1220,21 @@ cd /home/shaun/sms-interface/directus-extension-operation-sms-aws-sns
 npm test
 ```
 
-Expected: all tests pass (9 constants + 10 api = 19 tests).
+Expected: all tests pass (27 tests).
 
-- [ ] **Step 4: Commit (no source changes; this task only verifies build)**
-
-If `npm run build` produced a `package-lock.json` change or any source-tracked artifact, commit it. Otherwise skip:
+- [ ] **Step 4: Commit if needed**
 
 ```bash
 cd /home/shaun/sms-interface
 git status
-# If anything is uncommitted from build:
-git add -A directus-extension-operation-sms-aws-sns
-git diff --cached --quiet || git commit -m "chore(sms): verify build output"
+git diff --cached --quiet || git commit -m "chore(sms): verify bundle build"
 ```
+
+(No-op if `dist/` is gitignored and no other changes — that's fine.)
 
 ---
 
-## Task 7: Write the README
+## Task 9: Write the README
 
 **Files:**
 - Create: `directus-extension-operation-sms-aws-sns/README.md`
@@ -772,7 +1246,7 @@ Create `directus-extension-operation-sms-aws-sns/README.md`:
 ```markdown
 # directus-extension-operation-sms-aws-sns
 
-Directus flow operation that sends a single SMS via AWS SNS.
+Directus bundle: a flow operation that sends a single SMS via AWS SNS, plus a bootstrap hook that auto-creates an `sms_settings` singleton collection so admins can configure AWS credentials in the UI.
 
 ## Install
 
@@ -781,23 +1255,40 @@ Directus flow operation that sends a single SMS via AWS SNS.
    npm install
    npm run build
    ```
-2. Copy the package directory into your Directus instance's `extensions/` folder, **or** publish to npm and `npm install` it from your Directus project.
-3. Restart Directus.
+2. Copy the package directory into your Directus instance's `extensions/` folder, **or** publish to npm and install it from your Directus project.
+3. Restart Directus. On first start the hook creates the `sms_settings` collection (look for `Created singleton collection "sms_settings".` in the log).
 
-## Required environment variables
+## Configure (two options, can be combined)
+
+### Option A — Settings page (in-UI)
+
+In crf-admin: **Settings → Data Model → SMS Settings** (or navigate to the singleton through the standard Directus collection UI). Fill in:
+
+- **AWS Region** (e.g. `us-east-1`) — required
+- **AWS Access Key ID**
+- **AWS Secret Access Key** (masked input)
+- **AWS SNS Sender ID** (optional)
+
+> ⚠️ **Security:** values are stored plaintext in your Directus database. Anyone with admin DB or API access can read them, and they appear in DB backups. Prefer Option B for production.
+
+### Option B — Environment variables
+
+Set on the Directus host:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `AWS_REGION` | yes | e.g. `us-east-1`. Must be a region where SNS SMS is supported. |
-| `AWS_ACCESS_KEY_ID` | conditional | Required unless using the SDK's default credential chain (IAM role, profile). |
+| `AWS_REGION` | yes | e.g. `us-east-1`. |
+| `AWS_ACCESS_KEY_ID` | conditional | Required unless using SDK default credential chain (IAM role, profile). |
 | `AWS_SECRET_ACCESS_KEY` | conditional | Same as above. |
-| `AWS_SNS_SENDER_ID` | no | Alphanumeric sender ID. Honored only in countries that support it; ignored in US/Canada. |
+| `AWS_SNS_SENDER_ID` | no | Honored only in countries that support alphanumeric Sender IDs. |
+
+Env vars take precedence over the settings collection per-key. You can mix: e.g. set `AWS_REGION` in env and store credentials in the settings page.
 
 IAM permission required: `sns:Publish`.
 
 ## Operation options
 
-- **To** — recipient phone number, E.164 format (e.g. `+15551234567`). Supports `{{ }}` template variables.
+- **To** — recipient phone number, E.164 (e.g. `+15551234567`). Supports `{{ }}` template variables.
 - **Message** — SMS body. Supports `{{ }}` template variables.
 - **SMS Type** — `Transactional` (default) or `Promotional`.
 
@@ -827,64 +1318,63 @@ npm run build     # one-shot build
 ```bash
 cd /home/shaun/sms-interface
 git add directus-extension-operation-sms-aws-sns/README.md
-git commit -m "docs(sms): add README with install, env vars, and usage"
+git commit -m "docs(sms): README covering hybrid config and AWS prerequisites"
 ```
 
 ---
 
-## Task 8: Manual end-to-end verification
+## Task 10: Manual end-to-end verification
 
-This task is performed by a human operator with AWS access. There is no automated check.
+Performed by a human operator with AWS access. No automated check.
 
-- [ ] **Step 1: Set environment variables on the Directus host**
+- [ ] **Step 1: Build, install, restart**
 
-In the Directus instance's `.env` (or container env):
+Build the extension, copy the package into Directus's `extensions/`, restart.
 
-```
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-# Optional:
-# AWS_SNS_SENDER_ID=MYBRAND
-```
+- [ ] **Step 2: Verify auto-bootstrap**
 
-- [ ] **Step 2: Verify a destination phone number in SNS sandbox**
+In the Directus log, find `Created singleton collection "sms_settings".`
+Navigate to the new collection in crf-admin — confirm:
+- Singleton form (no list view)
+- Four fields visible (region, access key, secret, sender ID)
+- Secret field renders as concealed (dots) on save
 
-In AWS Console → SNS → Mobile → Sandbox destination phone numbers, add and verify your test number. Skip if account is already in production.
+- [ ] **Step 3: Path A — Settings page only**
 
-- [ ] **Step 3: Confirm SMS spending limit > $0**
+Leave AWS env vars unset. Fill in region + credentials in the SMS Settings page. Verify a destination phone in the SNS sandbox; confirm spend cap > 0. Build a manual-trigger flow with one Send SMS operation (`to` = your verified number, `message` = `Test from settings page.`, `smsType` = Transactional). Run the flow.
 
-AWS Console → SNS → Mobile → Text messaging (SMS) preferences. Default `$1` is fine for a single test.
+Confirm:
+- SMS received with body `Test from settings page.\n\n(do not reply)`
+- Flow log shows `{ messageId, to }`
 
-- [ ] **Step 4: Install the built extension into Directus**
+- [ ] **Step 4: Path B — Env override**
 
-Copy `directus-extension-operation-sms-aws-sns/` (with `dist/`, `package.json`) into Directus's `extensions/` directory. Restart Directus.
+Set `AWS_REGION=us-west-2` (or any region different from your settings) on the Directus host. Restart. Edit the same flow (no changes) and run it. Confirm via the SNS console that the publish hit `us-west-2` (proves env wins over settings).
 
-- [ ] **Step 5: Build a test flow**
+- [ ] **Step 5: Negative test**
 
-In crf-admin: Settings → Flows → Create.
-- Trigger: `Manual`.
-- Add operation: pick **Send SMS (AWS SNS)**.
-- `To`: your verified phone number (E.164).
-- `Message`: `Test from Directus.`
-- `SMS Type`: `Transactional`.
-- Save flow.
+Edit the flow, change `to` to `5551234567` (no `+`). Run. Confirm flow takes the reject path, no SMS sent, log shows `Invalid phone number: must be E.164`.
 
-- [ ] **Step 6: Run the flow and verify**
+- [ ] **Step 6: Missing-region test**
 
-Trigger the flow manually. Confirm:
-- SMS received on the test phone, body reads exactly `Test from Directus.\n\n(do not reply)`.
-- Flow execution log shows the operation resolved with `{ messageId, to }`.
-
-- [ ] **Step 7: Negative test**
-
-Edit the flow, change `To` to `5551234567` (no `+`). Run again.
-Confirm: flow takes the reject path, no SMS sent, log shows `Invalid phone number: must be E.164`.
+Clear both env vars and the `aws_region` field in SMS Settings. Restart. Run the flow. Confirm reject with `AWS region not configured. Set AWS_REGION env var or configure SMS Settings.`
 
 ---
 
 ## Self-Review Notes
 
-- **Spec coverage:** Every spec section has a task. Constants + regex → Task 2. Validation → Task 3. Footer + SMSType + SenderID + success + error logging → Task 4. Panel UI (3 fields, overview) → Task 5. Build → Task 6. README (env vars, prerequisites, install) → Task 7. Manual E2E (incl. sandbox + spending cap) → Task 8.
-- **Type consistency:** `Options.smsType` literal `"Transactional" | "Promotional"` matches the dropdown choices in `app.ts`. `Result` shape `{ messageId, to }` is what tests assert and what the README documents. `FOOTER` and `E164_REGEX` names match across `constants.ts`, `api.ts`, and tests.
-- **No placeholders:** Every code block is complete. Every command has expected output. No "TBD" or "implement later".
+- **Spec coverage:**
+  - Bundle structure (operation + hook) → Task 1 (`package.json` declares bundle), Tasks 6/7 (entries).
+  - `FOOTER`, `E164_REGEX`, `SETTINGS_COLLECTION` → Task 2.
+  - Hybrid config resolver (env → settings collection, region required, optional creds, optional sender) → Task 3.
+  - Handler validation (E.164, message, region) → Task 4.
+  - Handler success path (footer append, SMSType, SenderID present/absent, settings fallback, error logging) → Task 5.
+  - Panel UI (To/Message/SMS Type) + overview → Task 6.
+  - Auto-bootstrap of `sms_settings` singleton with masked secret field → Task 7.
+  - Build green, all tests pass → Task 8.
+  - README covering both config paths, security caveat, AWS prereqs → Task 9.
+  - Manual E2E covering both config paths, env precedence, negatives → Task 10.
+
+- **Type consistency:** `Options.smsType` literal matches dropdown choices; `Result` shape `{ messageId, to }` matches tests, README, and data flow example. `AwsConfig` from `config.ts` is the only shape consumed by `api.ts`. `SETTINGS_COLLECTION` constant used everywhere the collection name appears.
+
+- **No placeholders:** Every code block is complete. Every command has expected output. The hook's lack of unit tests is explicitly justified, not glossed.
