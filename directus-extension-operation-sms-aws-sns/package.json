@@ -1,0 +1,32 @@
+{
+  "name": "directus-extension-operation-sms-aws-sns",
+  "version": "0.1.0",
+  "description": "Directus bundle: flow operation that sends SMS via AWS SNS, with an auto-created settings collection.",
+  "type": "module",
+  "directus:extension": {
+    "type": "bundle",
+    "path": "dist/index.js",
+    "entries": [
+      { "type": "operation", "name": "sms-aws-sns", "source": "src/operation/index.ts" },
+      { "type": "hook", "name": "sms-aws-sns-bootstrap", "source": "src/hook/index.ts" }
+    ],
+    "host": "^10.0.0 || ^11.0.0"
+  },
+  "scripts": {
+    "build": "directus-extension build",
+    "dev": "directus-extension build -w",
+    "link": "directus-extension link",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sns": "^3.700.0"
+  },
+  "devDependencies": {
+    "@directus/extensions-sdk": "^12.0.0",
+    "@types/node": "^20.11.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
+}
