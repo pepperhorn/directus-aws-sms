@@ -22,7 +22,9 @@ Output lands in `directus-extension-operation-sms-aws-sns/dist/` (`app.js` + `ap
 
 ## Install on a remote Directus host (via Tailscale)
 
-Assuming the Directus host is reachable as `directus.tail-scale-name.ts.net` (or whatever your tailnet name is) and Directus loads extensions from `/directus/extensions/` (the default for the Docker image):
+The build inlines `@aws-sdk/client-sns` and all transitive deps into `dist/api.js`, so the install footprint is just `package.json` + `dist/` (≈350 KB total). No `node_modules/` needed on the remote host, and Directus does **not** run `npm install` for extensions on restart — it just scans `EXTENSIONS_PATH` and loads the files pointed to by each extension's manifest.
+
+Assuming the Directus host is reachable as `directus.your-tailnet.ts.net` and extensions live at `/directus/extensions/` (default for the Docker image):
 
 ```bash
 # 1. Build locally
@@ -30,16 +32,14 @@ cd directus-extension-operation-sms-aws-sns
 npm install
 npm run build
 
-# 2. Bundle the package (everything Directus needs at runtime)
+# 2. Tarball just the runtime files
+tar -czf ../sms-aws-sns.tar.gz package.json dist
 cd ..
-tar -czf sms-aws-sns.tar.gz \
-  -C directus-extension-operation-sms-aws-sns \
-  package.json dist node_modules
 
 # 3. Copy over Tailscale
 scp sms-aws-sns.tar.gz directus.your-tailnet.ts.net:~/
 
-# 4. On the remote host, extract into Directus's extensions dir
+# 4. Extract into Directus's extensions dir
 ssh directus.your-tailnet.ts.net '
   set -e
   EXT=/directus/extensions/directus-extension-operation-sms-aws-sns
@@ -54,7 +54,7 @@ ssh directus.your-tailnet.ts.net 'sudo systemctl restart directus'
 # ssh directus.your-tailnet.ts.net 'docker restart directus'
 ```
 
-Adjust paths and the restart command for your deployment (bare-metal vs Docker vs Compose). Bundling `node_modules` avoids needing to `npm install` on the remote host.
+Adjust paths and the restart command for your deployment (bare-metal vs Docker vs Compose).
 
 On first restart, watch the Directus log for:
 
