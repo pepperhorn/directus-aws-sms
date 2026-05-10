@@ -16,7 +16,7 @@ Directus bundle: a flow operation that sends a single SMS via AWS SNS, plus a bo
 
 ### Option A — Settings page (in-UI)
 
-In crf-admin: **Settings → Data Model → SMS Settings** (or navigate to the singleton through the standard Directus collection UI). Fill in:
+In crf-admin: open the **SMS Settings** singleton from the Content module sidebar (singletons render as a single editable form, no list view). Fill in:
 
 - **AWS Region** (e.g. `us-east-1`) — required
 - **AWS Access Key ID**
