@@ -114,10 +114,10 @@ describe("operation.handler success path", () => {
       },
     });
 
-    const result = await operation.handler(
+    const result = (await operation.handler(
       { to: "+447700900123", message: "hi", smsType: "Transactional" },
       c
-    );
+    )) as { messageId: string; to: string };
 
     expect(result.messageId).toBe("id-db");
     const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
@@ -160,10 +160,10 @@ describe("operation.handler success path", () => {
     snsMock.on(PublishCommand).resolves({});
     const c = ctx({ env: { AWS_REGION: "us-east-1" } });
 
-    const result = await operation.handler(
+    const result = (await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Transactional" },
       c
-    );
+    )) as { messageId: string; to: string };
 
     expect(result.messageId).toBe("");
   });
