@@ -16,6 +16,11 @@
         "type": "hook",
         "name": "sms-aws-sns-bootstrap",
         "source": "src/hook/index.ts"
+      },
+      {
+        "type": "operation",
+        "name": "sms-number-backfill",
+        "source": { "app": "src/backfill/app.ts", "api": "src/backfill/api.ts" }
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
