@@ -30,15 +30,16 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
 
     const ensureTicketing = async (schema: any) => {
       const collections = schema?.collections ?? {};
-      if (collections[TICKET_COLLECTION] && collections[MESSAGE_COLLECTION]) return;
       const collectionsService = new CollectionsService({ schema, knex: database });
-      const relationsService = new RelationsService({ schema, knex: database });
 
       if (!collections[TICKET_COLLECTION]) await collectionsService.createOne(ticketCollectionPayload);
       if (!collections[MESSAGE_COLLECTION]) await collectionsService.createOne(messageCollectionPayload);
 
       // Relations require both collections to exist; create any that are missing.
+      // Always run this loop (cheap, guarded by hasRelation) so a boot that aborted
+      // partway through relation creation can still complete on a later boot.
       const freshSchema = await getSchema();
+      const relationsService = new RelationsService({ schema: freshSchema, knex: database });
       const existingRelations: any[] = (freshSchema as any)?.relations ?? [];
       const hasRelation = (collection: string, field: string) =>
         existingRelations.some((r) => r.collection === collection && r.field === field);
