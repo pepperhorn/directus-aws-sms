@@ -65,6 +65,9 @@ Each unit has one purpose, a defined interface, and is independently testable.
 - `channel` — `sms` (extensible: `email`, `social`, …)
 - `client` — m2o → `family` (nullable; null = unmatched/triage)
 - `external_identity` — the counterpart address: E.164 phone now (email/handle later)
+- `our_identity` — our side's address the conversation is on (the two-way number the parent
+  texted, i.e. the inbound `destinationNumber`); staff replies originate from this. Makes the
+  model N-number capable.
 - `assignee` — m2o → `directus_users` (nullable)
 - `last_message_at` — timestamp (drives inbox sort)
 - standard `date_created` / `date_updated`
@@ -195,6 +198,10 @@ Reuse the existing Vitest harness. Unit coverage:
 3. **Normalization on `+614`.** `03`/landline numbers identified and flagged for replacement
    (can't receive SMS); null mobiles backfilled from Square.
 4. **DLQ replay = scheduled SQS-drain flow + manual "drain now"** action.
+5. **One active two-way number for v1** (pool model). Two-way is enabled per-number and pointed at
+   the SNS topic; the design is N-number capable via `client_ticket.our_identity`, so adding the
+   second number later is config-only (no code change). Replies always originate from the ticket's
+   `our_identity`.
 
 ### Remaining for the implementation plan (detail, not direction)
 
