@@ -31,9 +31,10 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
     const ensureTicketing = async (schema: any) => {
       const collections = schema?.collections ?? {};
       const collectionsService = new CollectionsService({ schema, knex: database });
+      let didWork = false;
 
-      if (!collections[TICKET_COLLECTION]) await collectionsService.createOne(ticketCollectionPayload);
-      if (!collections[MESSAGE_COLLECTION]) await collectionsService.createOne(messageCollectionPayload);
+      if (!collections[TICKET_COLLECTION]) { await collectionsService.createOne(ticketCollectionPayload); didWork = true; }
+      if (!collections[MESSAGE_COLLECTION]) { await collectionsService.createOne(messageCollectionPayload); didWork = true; }
 
       // Relations require both collections to exist; create any that are missing.
       // Always run this loop (cheap, guarded by hasRelation) so a boot that aborted
@@ -44,9 +45,9 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
       const hasRelation = (collection: string, field: string) =>
         existingRelations.some((r) => r.collection === collection && r.field === field);
       for (const rel of ticketingRelations) {
-        if (!hasRelation(rel.collection, rel.field)) await relationsService.createOne(rel);
+        if (!hasRelation(rel.collection, rel.field)) { await relationsService.createOne(rel); didWork = true; }
       }
-      logger.info(`Created ticketing collections "${TICKET_COLLECTION}" / "${MESSAGE_COLLECTION}".`);
+      if (didWork) logger.info(`Created ticketing collections "${TICKET_COLLECTION}" / "${MESSAGE_COLLECTION}".`);
     };
 
     try {

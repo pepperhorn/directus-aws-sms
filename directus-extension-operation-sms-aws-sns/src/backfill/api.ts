@@ -1,6 +1,6 @@
 // src/backfill/api.ts
 import { defineOperationApi } from "@directus/extensions-sdk";
-import { planNumberBackfill, type FamilyRow, type BackfillChange } from "./plan.js";
+import { planNumberBackfill, buildFamilyPatch, type FamilyRow, type BackfillChange } from "./plan.js";
 
 export type Options = { mode: "dry-run" | "apply" };
 
@@ -22,7 +22,8 @@ export default defineOperationApi<Options>({
       return { mode: "dry-run", summary, changeCount: changes.length, changes };
     }
 
-    // Apply: group normalize changes per family; rebuild family_sms_cc arrays where needed.
+    // Apply: group normalize changes per family; use buildFamilyPatch to re-validate
+    // against the freshly-read row before writing.
     const byId = new Map<string, BackfillChange[]>();
     for (const c of changes) {
       if (c.action !== "normalize") continue; // flags are reported, never auto-written
@@ -32,21 +33,15 @@ export default defineOperationApi<Options>({
     }
 
     let updated = 0;
+    const allSkipped: BackfillChange[] = [];
     for (const [id, famChanges] of byId) {
       const current: FamilyRow = await families.readOne(id, { fields: ["id", "family_admin_mobile", "family_sms_cc"] });
-      const patch: Record<string, unknown> = {};
-      const ccPatch = Array.isArray(current.family_sms_cc) ? [...current.family_sms_cc] : null;
-      for (const c of famChanges) {
-        if (c.field === "family_admin_mobile") patch.family_admin_mobile = c.to;
-        if (c.field === "family_sms_cc" && ccPatch && c.index !== undefined && ccPatch[c.index]) {
-          ccPatch[c.index] = { ...ccPatch[c.index], to_mobile: c.to };
-        }
-      }
-      if (ccPatch && famChanges.some((c) => c.field === "family_sms_cc")) patch.family_sms_cc = ccPatch;
+      const { patch, skipped } = buildFamilyPatch(current, famChanges);
+      allSkipped.push(...skipped);
       if (Object.keys(patch).length > 0) { await families.updateOne(id, patch); updated++; }
     }
 
     logger.info(`sms-number-backfill applied: ${updated} families updated; flagged ${summary.landline} landline / ${summary.unknown} unknown.`);
-    return { mode: "apply", summary, updated, flagged: changes.filter((c) => c.action === "flag") };
+    return { mode: "apply", summary, updated, skipped: allSkipped, flagged: changes.filter((c) => c.action === "flag") };
   },
 });
