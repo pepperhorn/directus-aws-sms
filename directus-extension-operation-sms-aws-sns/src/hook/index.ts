@@ -47,7 +47,7 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
             meta: {
               interface: "input",
               width: "half",
-              note: "Stored plaintext. Prefer AWS_ACCESS_KEY_ID env var in production.",
+              note: "Stored plaintext. Prefer SMS_AWS_ACCESS_KEY_ID env var in production.",
             },
           },
           {
@@ -57,7 +57,7 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
               interface: "input",
               width: "full",
               special: ["conceal"],
-              note: "Stored plaintext. Prefer AWS_SECRET_ACCESS_KEY env var in production.",
+              note: "Stored plaintext. Prefer SMS_AWS_SECRET_ACCESS_KEY env var in production.",
             },
           },
           {

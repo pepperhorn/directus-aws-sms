@@ -35,7 +35,7 @@ describe("operation.handler validation", () => {
   });
 
   it("rejects when phone is not E.164 (no AWS call, no config read)", async () => {
-    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
+    const c = ctx({ env: { SMS_AWS_REGION: "us-east-1" } });
     await expect(
       operation.handler(
         { to: "5551234567", message: "hi", smsType: "Transactional" },
@@ -46,7 +46,7 @@ describe("operation.handler validation", () => {
   });
 
   it("rejects when message is empty", async () => {
-    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
+    const c = ctx({ env: { SMS_AWS_REGION: "us-east-1" } });
     await expect(
       operation.handler(
         { to: "+15551234567", message: "   ", smsType: "Transactional" },
@@ -78,9 +78,9 @@ describe("operation.handler success path", () => {
 
     const c = ctx({
       env: {
-        AWS_REGION: "us-east-1",
-        AWS_ACCESS_KEY_ID: "AKIA",
-        AWS_SECRET_ACCESS_KEY: "shh",
+        SMS_AWS_REGION: "us-east-1",
+        SMS_AWS_ACCESS_KEY_ID: "AKIA",
+        SMS_AWS_SECRET_ACCESS_KEY: "shh",
       },
     });
 
@@ -129,7 +129,7 @@ describe("operation.handler success path", () => {
 
   it("propagates Promotional smsType", async () => {
     snsMock.on(PublishCommand).resolves({ MessageId: "id-2" });
-    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
+    const c = ctx({ env: { SMS_AWS_REGION: "us-east-1" } });
 
     await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Promotional" },
@@ -145,7 +145,7 @@ describe("operation.handler success path", () => {
 
   it("omits SenderID when not configured anywhere", async () => {
     snsMock.on(PublishCommand).resolves({ MessageId: "id-3" });
-    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
+    const c = ctx({ env: { SMS_AWS_REGION: "us-east-1" } });
 
     await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Transactional" },
@@ -158,7 +158,7 @@ describe("operation.handler success path", () => {
 
   it("returns empty messageId when SNS response omits MessageId", async () => {
     snsMock.on(PublishCommand).resolves({});
-    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
+    const c = ctx({ env: { SMS_AWS_REGION: "us-east-1" } });
 
     const result = (await operation.handler(
       { to: "+15551234567", message: "hi", smsType: "Transactional" },
@@ -181,7 +181,7 @@ describe("operation.handler error path", () => {
     snsMock.on(PublishCommand).rejects(snsErr);
 
     let logged = "";
-    const c = ctx({ env: { AWS_REGION: "us-east-1" } });
+    const c = ctx({ env: { SMS_AWS_REGION: "us-east-1" } });
     c.logger = {
       error: (msg: string) => {
         logged = msg;

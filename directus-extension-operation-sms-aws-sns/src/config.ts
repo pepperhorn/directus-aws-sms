@@ -24,10 +24,10 @@ export const resolveAwsConfig = async (
   ctx: ResolveContext
 ): Promise<AwsConfig> => {
   const fromEnv = {
-    region: trimOrUndefined(ctx.env.AWS_REGION),
-    accessKeyId: trimOrUndefined(ctx.env.AWS_ACCESS_KEY_ID),
-    secretAccessKey: trimOrUndefined(ctx.env.AWS_SECRET_ACCESS_KEY),
-    senderId: trimOrUndefined(ctx.env.AWS_SNS_SENDER_ID),
+    region: trimOrUndefined(ctx.env.SMS_AWS_REGION),
+    accessKeyId: trimOrUndefined(ctx.env.SMS_AWS_ACCESS_KEY_ID),
+    secretAccessKey: trimOrUndefined(ctx.env.SMS_AWS_SECRET_ACCESS_KEY),
+    senderId: trimOrUndefined(ctx.env.SMS_AWS_SNS_SENDER_ID),
   };
 
   const allEnvSet =
@@ -66,7 +66,7 @@ export const resolveAwsConfig = async (
   const region = fromEnv.region ?? fromSettings.region;
   if (!region) {
     throw new Error(
-      "AWS region not configured. Set AWS_REGION env var or configure SMS Settings."
+      "AWS region not configured. Set SMS_AWS_REGION env var or configure SMS Settings."
     );
   }
 

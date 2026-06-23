@@ -30,10 +30,10 @@ describe("resolveAwsConfig", () => {
     const { env, services, getSchema, accountability, readSingleton } =
       buildContext(
         {
-          AWS_REGION: "us-east-1",
-          AWS_ACCESS_KEY_ID: "AKIA",
-          AWS_SECRET_ACCESS_KEY: "shh",
-          AWS_SNS_SENDER_ID: "BRAND",
+          SMS_AWS_REGION: "us-east-1",
+          SMS_AWS_ACCESS_KEY_ID: "AKIA",
+          SMS_AWS_SECRET_ACCESS_KEY: "shh",
+          SMS_AWS_SNS_SENDER_ID: "BRAND",
         },
         null
       );
@@ -79,7 +79,7 @@ describe("resolveAwsConfig", () => {
 
   it("mixes sources: env wins per-key", async () => {
     const { env, services, getSchema, accountability } = buildContext(
-      { AWS_REGION: "ap-south-1" },
+      { SMS_AWS_REGION: "ap-south-1" },
       {
         aws_region: "us-east-1",
         aws_access_key_id: "AKIA_DB",
@@ -112,13 +112,13 @@ describe("resolveAwsConfig", () => {
     await expect(
       resolveAwsConfig({ env, services, getSchema, accountability })
     ).rejects.toThrow(
-      /AWS region not configured\. Set AWS_REGION env var or configure SMS Settings\./
+      /AWS region not configured\. Set SMS_AWS_REGION env var or configure SMS Settings\./
     );
   });
 
   it("treats whitespace-only env values as unset", async () => {
     const { env, services, getSchema, accountability } = buildContext(
-      { AWS_REGION: "   " },
+      { SMS_AWS_REGION: "   " },
       { aws_region: "eu-west-1" }
     );
 
@@ -134,7 +134,7 @@ describe("resolveAwsConfig", () => {
 
   it("handles empty settings record (no fields populated)", async () => {
     const { env, services, getSchema, accountability } = buildContext(
-      { AWS_REGION: "us-east-1" },
+      { SMS_AWS_REGION: "us-east-1" },
       {}
     );
 
