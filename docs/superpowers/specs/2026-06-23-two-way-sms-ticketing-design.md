@@ -114,11 +114,10 @@ Extend the existing send operation with an **origination** option:
 Outbound sends from the Two-way UI use `number` and append an `outbound` `client_message` to the
 ticket (storing the returned message id in `external_message_id`).
 
-> Implementation note: sending **from a specific origination number** is the End User Messaging
-> model (`SendTextMessage` with an origination identity), which differs from the SNS
-> `PhoneNumber` publish used for Sender-ID sends. The plan must resolve whether the `number` path
-> uses the End User Messaging API while the `senderId` path stays on SNS, or both migrate to End
-> User Messaging. Flagged for the implementation plan.
+> Decision: **keep both providers.** The `senderId` (spray) path stays on Amazon SNS (`Publish`
+> with Sender ID); the `number` (conversational) path uses AWS End User Messaging
+> (`SendTextMessage` with the number as origination identity). The operation routes to the right
+> provider based on the `origination` option.
 
 ### 4. Resilience & idempotency
 
@@ -126,8 +125,10 @@ ticket (storing the returned message id in `external_message_id`).
   built-in retry policy.
 - **SQS DLQ** on the SNS subscription durably captures anything that outlives the retry window
   (longer outage / repeated 5xx).
-- **Replay path** — a scheduled flow or manual "drain DLQ" action reprocesses DLQ messages into
-  tickets once Directus is healthy.
+- **Replay path** — the DLQ is an AWS **SQS** queue (pull-based), so a **scheduled** Directus flow
+  long-polls it every few minutes, reprocesses each message through the same upsert adapter, and
+  deletes on success; a **manual "drain now"** action is also provided. Recovery is automatic once
+  Directus is healthy. The DLQ only fills when an outage outlasts SNS's own retries.
 - **Idempotency** — `client_message.external_message_id` is unique and the adapter upserts on it,
   so SNS retries and DLQ replays never create duplicate tickets/messages. This is mandatory the
   moment retries exist.
@@ -136,7 +137,9 @@ ticket (storing the returned message id in `external_message_id`).
 
 Standard Directus Studio experience: select recipient families (filtered by `family_sms_option`),
 compose a message, and send via the send operation with `origination: senderId`. Each send writes
-an `outbound` `client_message` (no ticket, or a system ticket — resolved in the plan) for audit.
+a **per-recipient `outbound` `client_message`** for audit (preferred). If per-recipient rows prove
+impractical at blast volume, fall back to a single message item storing recipients in a JSON field,
+queried via **Directus 12 JSON filtering** to look up a particular recipient.
 
 ### 6. Two-way interface (v1)
 
@@ -147,10 +150,14 @@ polish; the full module is phase 2.
 
 ### 7. Number normalization & migration
 
-- A normalization utility converts AU local format (`04xx xxx xxx`) and variants to E.164
-  (`+614xxxxxxxx`), used on both inbound matching and outbound `to`.
-- **Backfill migration**: clean existing `family_admin_mobile` and `family_sms_cc[].to_mobile`
-  values to E.164. Real data-quality risk — unmatched inbound is the symptom of dirty numbers.
+- A normalization utility converts AU mobile formats to E.164, normalizing on the **`+614`**
+  prefix (not local `04`), used on both inbound matching and outbound `to`.
+- **`03` and other landline numbers cannot receive SMS** — identify and flag them for replacement;
+  they will never match inbound and must be corrected, not silently kept.
+- **Null / missing mobiles**: backfill from **Square** (existing customer records) where available.
+- **Backfill migration** over `family_admin_mobile` and `family_sms_cc[].to_mobile`: normalize to
+  E.164 (`+614…`), flag landline/un-normalizable entries for manual correction, and fill nulls from
+  Square. Real data-quality risk — unmatched inbound is the symptom of dirty numbers.
 
 ## AWS Provisioning (split of responsibility)
 
@@ -179,15 +186,21 @@ Reuse the existing Vitest harness. Unit coverage:
 - Origination selection: `senderId` vs `number` shapes the correct provider call.
 - Ticket grouping: append to existing open ticket vs create new; closed ticket → new ticket.
 
-## Open Questions for the Implementation Plan
+## Decisions (resolved during review)
 
-1. Does the `number` (conversational) send path use the End User Messaging `SendTextMessage` API
-   while `senderId` stays on SNS, or do both migrate to End User Messaging?
-2. Spray audit: do bulk sends write per-recipient `outbound` messages, a system ticket, or a
-   separate lightweight log?
-3. Exact normalization rules / library for AU numbers, and how to surface un-normalizable numbers
-   during backfill.
-4. DLQ replay trigger: scheduled flow vs manual action (or both).
+1. **Two providers, kept side by side.** Sprays send via Amazon SNS + Sender ID; conversational
+   sends via AWS End User Messaging + the number. The operation routes by `origination`.
+2. **Spray audit = per-recipient `outbound` rows** (preferred); fallback to a single item with a
+   JSON recipients field queried via Directus 12 JSON filtering if per-recipient is impractical.
+3. **Normalization on `+614`.** `03`/landline numbers identified and flagged for replacement
+   (can't receive SMS); null mobiles backfilled from Square.
+4. **DLQ replay = scheduled SQS-drain flow + manual "drain now"** action.
+
+### Remaining for the implementation plan (detail, not direction)
+
+- Specific E.164 normalization library/rules and how un-normalizable numbers surface during backfill.
+- Square backfill mechanics (API/export, field mapping, one-off vs ongoing).
+- Scheduled-drain interval and SQS long-poll/visibility-timeout settings.
 
 ## Phase 2 (not built in v1)
 
