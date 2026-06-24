@@ -185,3 +185,41 @@ describe("resolveAwsConfig", () => {
     expect(capturedCollection).toBe(SETTINGS_COLLECTION);
   });
 });
+
+describe("resolveAwsConfig — two-way number", () => {
+  const makeCtx = (env: Record<string, string | undefined>, settingsRow: Record<string, unknown> = {}) => ({
+    env,
+    services: {
+      ItemsService: class {
+        constructor(public collection: string, public _opts: unknown) {}
+        async readSingleton() {
+          return settingsRow;
+        }
+      },
+    } as any,
+    getSchema: async () => ({}) as any,
+    accountability: null,
+  });
+
+  it("reads aws_two_way_number from settings when env is unset", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx({}, { aws_region: "ap-southeast-2", aws_two_way_number: "+61480000001" }),
+    );
+    expect(cfg.twoWayNumber).toBe("+61480000001");
+  });
+
+  it("SMS_AWS_TWO_WAY_NUMBER env overrides the settings value", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx(
+        { SMS_AWS_REGION: "ap-southeast-2", SMS_AWS_TWO_WAY_NUMBER: "+61480000999" },
+        { aws_region: "ap-southeast-2", aws_two_way_number: "+61480000001" },
+      ),
+    );
+    expect(cfg.twoWayNumber).toBe("+61480000999");
+  });
+
+  it("leaves twoWayNumber undefined when configured nowhere", async () => {
+    const cfg = await resolveAwsConfig(makeCtx({ SMS_AWS_REGION: "ap-southeast-2" }, { aws_region: "ap-southeast-2" }));
+    expect(cfg.twoWayNumber).toBeUndefined();
+  });
+});
