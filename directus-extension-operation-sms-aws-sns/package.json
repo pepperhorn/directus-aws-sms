@@ -21,6 +21,11 @@
         "type": "operation",
         "name": "sms-number-backfill",
         "source": { "app": "src/backfill/app.ts", "api": "src/backfill/api.ts" }
+      },
+      {
+        "type": "operation",
+        "name": "sms-spray",
+        "source": { "app": "src/spray/app.ts", "api": "src/spray/api.ts" }
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
