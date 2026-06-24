@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
+import {
+  PinpointSMSVoiceV2Client,
+  SendTextMessageCommand,
+} from "@aws-sdk/client-pinpoint-sms-voice-v2";
 import operation from "./api.js";
 
 const snsMock = mockClient(SNSClient);
+const pinpointMock = mockClient(PinpointSMSVoiceV2Client);
 
 const makeServices = (settingsRow: Record<string, unknown> = {}) => {
   const readSingleton = vi.fn(async () => settingsRow);
@@ -89,7 +94,9 @@ describe("operation.handler success path", () => {
       c
     );
 
-    expect(result).toEqual({ messageId: "msg-abc-123", to: "+15551234567" });
+    expect((result as any).messageId).toBe("msg-abc-123");
+    expect((result as any).to).toBe("+15551234567");
+    expect((result as any).origination).toBe("senderId");
 
     const calls = snsMock.commandCalls(PublishCommand);
     expect(calls).toHaveLength(1);
@@ -200,5 +207,99 @@ describe("operation.handler error path", () => {
 
     expect(logged).toContain("InvalidParameterException");
     expect(logged).toContain("Invalid parameter: PhoneNumber");
+  });
+});
+
+// Fake ItemsService that serves BOTH the settings singleton and the ticket/message writes.
+const makeServicesWithTicketing = (settingsRow: Record<string, unknown> = {}) => {
+  const created: { collection: string; item: any }[] = [];
+  class FakeItemsService {
+    constructor(public collection: string, public _opts: unknown) {}
+    async readSingleton() {
+      return settingsRow;
+    }
+    async readByQuery() {
+      return []; // no open ticket → create path
+    }
+    async createOne(item: any) {
+      created.push({ collection: this.collection, item });
+      return this.collection === "client_ticket" ? "t-new" : "m-new";
+    }
+    async updateOne(id: any) {
+      return id;
+    }
+  }
+  return { services: { ItemsService: FakeItemsService } as any, created };
+};
+
+describe("operation.handler — origination=number (conversational)", () => {
+  beforeEach(() => {
+    snsMock.reset();
+    pinpointMock.reset();
+  });
+
+  it("sends via End User Messaging, omits footer, and writes an outbound client_message", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-9" });
+    const { services, created } = makeServicesWithTicketing({
+      aws_region: "ap-southeast-2",
+      aws_two_way_number: "+61480000001",
+    });
+
+    const c = {
+      env: {},
+      services,
+      getSchema: async () => ({}) as any,
+      accountability: null,
+      data: {},
+      database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    const result = (await operation.handler(
+      { to: "+61400000001", message: "See you at 3pm", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    )) as any;
+
+    expect(result.messageId).toBe("eum-9");
+    expect(result.origination).toBe("number");
+    expect(result.from).toBe("+61480000001");
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("See you at 3pm");
+    expect(input.MessageBody).not.toContain("(do not reply)");
+
+    const msg = created.find((x) => x.collection === "client_message");
+    expect(msg!.item).toMatchObject({
+      direction: "outbound",
+      external_message_id: "eum-9",
+      delivery_status: "sent",
+      to_identity: "+61400000001",
+      from_identity: "+61480000001",
+    });
+    expect(snsMock.commandCalls(PublishCommand)).toHaveLength(0);
+  });
+
+  it("defaults to senderId (footer appended, no client_message) when origination is omitted", async () => {
+    snsMock.on(PublishCommand).resolves({ MessageId: "sns-default" });
+    const { services, created } = makeServicesWithTicketing({ aws_region: "ap-southeast-2" });
+    const c = {
+      env: {},
+      services,
+      getSchema: async () => ({}) as any,
+      accountability: null,
+      data: {},
+      database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    const result = (await operation.handler(
+      { to: "+61400000001", message: "Blast", smsType: "Promotional" } as any,
+      c as any,
+    )) as any;
+
+    expect(result.origination).toBe("senderId");
+    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
+    expect(input.Message).toBe("Blast\n\n(do not reply)");
+    expect(created.find((x) => x.collection === "client_message")).toBeUndefined();
   });
 });

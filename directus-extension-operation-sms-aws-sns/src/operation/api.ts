@@ -1,34 +1,31 @@
 import { defineOperationApi } from "@directus/extensions-sdk";
-import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
-import { FOOTER, E164_REGEX } from "../constants.js";
 import { resolveAwsConfig } from "../config.js";
+import { sendSms, type Origination } from "../send/provider.js";
+import { appendOutboundMessage, type ItemsServiceLike } from "../send/outbound.js";
 
 export type Options = {
   to: string;
   message: string;
   smsType: "Transactional" | "Promotional";
+  origination?: Origination;
 };
 
 export type Result = {
   messageId: string;
   to: string;
+  from: string;
+  origination: Origination;
+  ticketId?: string | number;
+  clientMessageId?: string | number;
 };
 
 export default defineOperationApi<Options>({
   id: "sms-aws-sns",
   handler: async (
-    { to, message, smsType },
+    { to, message, smsType, origination },
     { env, services, getSchema, accountability, logger }
   ) => {
-    if (typeof to !== "string" || !E164_REGEX.test(to)) {
-      throw new Error(
-        "Invalid phone number: must be E.164 (e.g. +15551234567)"
-      );
-    }
-
-    if (typeof message !== "string" || message.trim().length === 0) {
-      throw new Error("Message body is required");
-    }
+    const route: Origination = origination === "number" ? "number" : "senderId";
 
     const config = await resolveAwsConfig({
       env: env as Record<string, string | undefined>,
@@ -37,52 +34,42 @@ export default defineOperationApi<Options>({
       accountability,
     });
 
-    const finalMessage = message + FOOTER;
-
-    const messageAttributes: Record<
-      string,
-      { DataType: string; StringValue: string }
-    > = {
-      "AWS.SNS.SMS.SMSType": {
-        DataType: "String",
-        StringValue: smsType ?? "Transactional",
-      },
-    };
-
-    if (config.senderId) {
-      messageAttributes["AWS.SNS.SMS.SenderID"] = {
-        DataType: "String",
-        StringValue: config.senderId,
-      };
-    }
-
-    const clientConfig: { region: string; credentials?: { accessKeyId: string; secretAccessKey: string } } = {
-      region: config.region,
-    };
-    if (config.accessKeyId && config.secretAccessKey) {
-      clientConfig.credentials = {
-        accessKeyId: config.accessKeyId,
-        secretAccessKey: config.secretAccessKey,
-      };
-    }
-
-    const client = new SNSClient(clientConfig);
-
+    let sent;
     try {
-      const result = await client.send(
-        new PublishCommand({
-          PhoneNumber: to,
-          Message: finalMessage,
-          MessageAttributes: messageAttributes,
-        })
-      );
-      return { messageId: result.MessageId ?? "", to } satisfies Result;
+      sent = await sendSms({ to, message, origination: route, smsType }, config);
     } catch (err) {
       const e = err as { name?: string; message?: string };
       logger.error(
-        `SNS Publish failed: ${e.name ?? "Error"}: ${e.message ?? String(err)}`
+        `SMS send failed (${route}): ${e.name ?? "Error"}: ${e.message ?? String(err)}`
       );
       throw err;
     }
+
+    const result: Result = {
+      messageId: sent.messageId,
+      to: sent.to,
+      from: sent.from,
+      origination: route,
+    };
+
+    if (route === "number") {
+      const { ItemsService } = services as any;
+      const schema = await getSchema();
+      const items = (collection: string): ItemsServiceLike =>
+        new ItemsService(collection, { schema, accountability });
+      const written = await appendOutboundMessage(
+        {
+          externalIdentity: sent.to,
+          ourIdentity: sent.from,
+          body: message,
+          externalMessageId: sent.messageId,
+        },
+        { items }
+      );
+      result.ticketId = written.ticketId;
+      result.clientMessageId = written.messageId;
+    }
+
+    return result;
   },
 });
