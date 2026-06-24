@@ -1,0 +1,84 @@
+// src/send/outbound.ts
+import { TICKET_COLLECTION, MESSAGE_COLLECTION } from "../constants.js";
+
+export type ItemsServiceLike = {
+  readByQuery(q: unknown): Promise<any[]>;
+  createOne(item: Record<string, unknown>): Promise<string | number>;
+  updateOne(key: string | number, item: Record<string, unknown>): Promise<string | number>;
+};
+
+export type AppendOutboundDeps = {
+  items: (collection: string) => ItemsServiceLike;
+  now?: () => string;
+};
+
+export type AppendOutboundInput = {
+  externalIdentity: string;
+  ourIdentity: string;
+  body: string;
+  externalMessageId: string;
+  client?: string | null;
+  raw?: unknown;
+};
+
+export type AppendOutboundResult = {
+  ticketId: string | number;
+  messageId: string | number;
+  createdTicket: boolean;
+};
+
+/**
+ * Find the OPEN client_ticket for (external_identity, our_identity) or create one,
+ * insert an `outbound` client_message keyed on the provider message id, and bump last_message_at.
+ * Used by the send operation (origination=number) and by Plan 3's reply action.
+ */
+export async function appendOutboundMessage(
+  input: AppendOutboundInput,
+  deps: AppendOutboundDeps,
+): Promise<AppendOutboundResult> {
+  const now = deps.now ? deps.now() : new Date().toISOString();
+  const tickets = deps.items(TICKET_COLLECTION);
+  const messages = deps.items(MESSAGE_COLLECTION);
+
+  const open = await tickets.readByQuery({
+    filter: {
+      external_identity: { _eq: input.externalIdentity },
+      our_identity: { _eq: input.ourIdentity },
+      status: { _eq: "open" },
+    },
+    limit: 1,
+  });
+
+  let ticketId: string | number;
+  let createdTicket = false;
+
+  if (Array.isArray(open) && open.length > 0) {
+    ticketId = open[0].id;
+    await tickets.updateOne(ticketId, { last_message_at: now });
+  } else {
+    ticketId = await tickets.createOne({
+      status: "open",
+      channel: "sms",
+      external_identity: input.externalIdentity,
+      our_identity: input.ourIdentity,
+      client: input.client ?? null,
+      last_message_at: now,
+    });
+    createdTicket = true;
+  }
+
+  const messageId = await messages.createOne({
+    ticket: ticketId,
+    direction: "outbound",
+    channel: "sms",
+    body: input.body,
+    from_identity: input.ourIdentity,
+    to_identity: input.externalIdentity,
+    external_message_id: input.externalMessageId,
+    delivery_status: "sent",
+    raw: input.raw ?? null,
+    timestamp: now,
+  });
+
+  return { ticketId, messageId, createdTicket };
+}
