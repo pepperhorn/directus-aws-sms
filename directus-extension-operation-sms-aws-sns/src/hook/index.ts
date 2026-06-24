@@ -20,6 +20,7 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
           { field: "aws_access_key_id", type: "string", meta: { interface: "input", width: "half", note: "Stored plaintext. Prefer SMS_AWS_ACCESS_KEY_ID env var in production." } },
           { field: "aws_secret_access_key", type: "string", meta: { interface: "input", width: "full", special: ["conceal"], note: "Stored plaintext. Prefer SMS_AWS_SECRET_ACCESS_KEY env var in production." } },
           { field: "aws_sns_sender_id", type: "string", meta: { interface: "input", width: "half", note: "Optional alphanumeric Sender ID (where supported by destination country)." } },
+          { field: "aws_two_way_number", type: "string", meta: { interface: "input", width: "half", note: "E.164 two-way number for conversational sends (AWS End User Messaging origination identity). Prefer SMS_AWS_TWO_WAY_NUMBER env var in production." } },
         ],
       });
       const freshSchema = await getSchema();
