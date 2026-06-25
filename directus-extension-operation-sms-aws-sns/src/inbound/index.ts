@@ -1,7 +1,7 @@
 // src/inbound/index.ts
 import { defineEndpoint } from "@directus/extensions-sdk";
 import { TICKET_COLLECTION, MESSAGE_COLLECTION, FAMILY_COLLECTION } from "../constants.js";
-import { verifySnsSignature, type SnsMessage } from "./sns-verify.js";
+import { verifySnsSignature, snsCertUrlIsValid, type SnsMessage } from "./sns-verify.js";
 import { parseSnsEnvelope, parseInboundSms } from "./parse.js";
 import { resolveFamily } from "./resolve-family.js";
 import { upsertInbound } from "./upsert.js";
@@ -21,8 +21,18 @@ export default defineEndpoint((router, { services, getSchema, logger, database }
   router.post("/", async (req: any, res: any) => {
     let msg: SnsMessage;
     try {
-      msg = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-      if (msg === null || typeof msg !== "object") throw new Error("non-object body");
+      let raw: unknown;
+      if (Buffer.isBuffer(req.body)) {
+        const str = req.body.toString("utf8");
+        if (!str.trim()) throw new Error("empty Buffer body");
+        raw = JSON.parse(str);
+      } else if (typeof req.body === "string") {
+        raw = JSON.parse(req.body);
+      } else {
+        raw = req.body;
+      }
+      if (raw === null || typeof raw !== "object") throw new Error("non-object body");
+      msg = raw as SnsMessage;
     } catch {
       logger.warn("SMS inbound: unparseable SNS body, rejecting.");
       return res.status(400).send("bad request");
@@ -41,11 +51,15 @@ export default defineEndpoint((router, { services, getSchema, logger, database }
     // 2. Subscription handshake.
     if (envelope.Type === "SubscriptionConfirmation") {
       if (typeof envelope.SubscribeURL === "string") {
-        try {
-          await fetchText(envelope.SubscribeURL);
-          logger.info("SMS inbound: confirmed SNS subscription.");
-        } catch (err) {
-          logger.error(`SMS inbound: SubscribeURL confirm failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (!snsCertUrlIsValid(envelope.SubscribeURL)) {
+          logger.warn(`SMS inbound: SubscriptionConfirmation had non-SNS SubscribeURL "${envelope.SubscribeURL}" — skipping fetch.`);
+        } else {
+          try {
+            await fetchText(envelope.SubscribeURL);
+            logger.info("SMS inbound: confirmed SNS subscription.");
+          } catch (err) {
+            logger.error(`SMS inbound: SubscribeURL confirm failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
       return res.status(200).send("ok");
