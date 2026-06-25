@@ -2,7 +2,7 @@
 import { defineOperationApi } from "@directus/extensions-sdk";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { resolveAwsConfig } from "../config.js";
-import { TICKET_COLLECTION, MESSAGE_COLLECTION } from "../constants.js";
+import { TICKET_COLLECTION, MESSAGE_COLLECTION, FAMILY_COLLECTION } from "../constants.js";
 import { parseSnsEnvelope, parseInboundSms } from "../inbound/parse.js";
 import { resolveFamily } from "../inbound/resolve-family.js";
 import { upsertInbound } from "../inbound/upsert.js";
@@ -45,7 +45,7 @@ export default defineOperationApi<Options>({
         return; // unprocessable payload: delete rather than loop forever
       }
       const schema = await getSchema();
-      const families: FamilyMatchRow[] = await new ItemsService("family", { schema, accountability: null })
+      const families: FamilyMatchRow[] = await new ItemsService(FAMILY_COLLECTION, { schema, accountability: null })
         .readByQuery({ fields: ["id", "family_admin_mobile", "family_sms_cc"], limit: -1 });
       const resolution = resolveFamily(sms.originationNumber, families);
       const deps: UpsertDeps = {

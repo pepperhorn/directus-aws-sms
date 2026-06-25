@@ -1,5 +1,5 @@
 // src/inbound/upsert.test.ts
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { upsertInbound } from "./upsert.js";
 import type { ItemsLike } from "./types.js";
 import type { InboundSms, FamilyResolution } from "./types.js";
@@ -15,6 +15,7 @@ const sms = (id: string, overrides: Partial<InboundSms> = {}): InboundSms => ({
 
 const oneMatch: FamilyResolution = { matchCount: 1, familyId: "fam-1", matchedFamilyIds: ["fam-1"] };
 const noMatch: FamilyResolution = { matchCount: 0, familyId: null, matchedFamilyIds: [] };
+const manyMatch: FamilyResolution = { matchCount: 2, familyId: null, matchedFamilyIds: ["a", "b"] };
 
 // Minimal in-memory fakes that honour the unique external_message_id + open-ticket lookups.
 function makeDeps() {
@@ -106,5 +107,55 @@ describe("upsertInbound", () => {
     ticketRows[0].last_message_at = "2000-01-01T00:00:00.000Z";
     await upsertInbound(sms("in-2"), oneMatch, deps);
     expect(ticketRows[0].last_message_at).toBe("2026-06-25T00:00:00.000Z");
+  });
+
+  it("handles create-conflict race: pre-check misses but createOne throws unique violation, returns existing row without throwing", async () => {
+    // Simulate: idempotency pre-check sees nothing (miss), but by the time createOne runs
+    // another concurrent request has already inserted the row. createOne throws, then the
+    // follow-up read finds the now-existing row.
+    const ticketRows: any[] = [];
+    let tId = 0;
+
+    const tickets: ItemsLike = {
+      readByQuery: async () => [],
+      createOne: async (item) => {
+        const id = `t${++tId}`;
+        ticketRows.push({ id, ...item });
+        return id;
+      },
+      updateOne: async (id, patch) => {
+        Object.assign(ticketRows.find((r) => r.id === id), patch);
+        return id;
+      },
+    };
+
+    // messages.readByQuery: first call (idempotency pre-check) returns [] (miss),
+    // all subsequent calls (after createOne throws) return the existing row.
+    let readCallCount = 0;
+    const existingRow = { id: "m-existing", ticket: "t-existing", external_message_id: "race-msg-1" };
+    const messages: ItemsLike = {
+      readByQuery: async () => {
+        readCallCount++;
+        if (readCallCount === 1) return []; // pre-check: miss
+        return [existingRow];              // post-conflict re-read: hit
+      },
+      createOne: async () => {
+        throw new Error("duplicate key value violates unique constraint");
+      },
+      updateOne: async (id) => id,
+    };
+
+    const deps = { tickets, messages, now: () => "2026-06-25T00:00:00.000Z" };
+    const result = await upsertInbound(sms("race-msg-1"), oneMatch, deps);
+
+    expect(result.messageCreated).toBe(false);
+    expect(result.ticketId).toBe("t-existing");
+    // Should not throw — the race-condition duplicate is handled gracefully.
+  });
+
+  it("links client=null when family resolution has many matches (triage)", async () => {
+    const { deps, ticketRows } = makeDeps();
+    await upsertInbound(sms("in-1"), manyMatch, deps);
+    expect(ticketRows[0].client).toBeNull();
   });
 });

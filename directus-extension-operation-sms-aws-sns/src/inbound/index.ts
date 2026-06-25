@@ -1,6 +1,6 @@
 // src/inbound/index.ts
 import { defineEndpoint } from "@directus/extensions-sdk";
-import { TICKET_COLLECTION, MESSAGE_COLLECTION } from "../constants.js";
+import { TICKET_COLLECTION, MESSAGE_COLLECTION, FAMILY_COLLECTION } from "../constants.js";
 import { verifySnsSignature, type SnsMessage } from "./sns-verify.js";
 import { parseSnsEnvelope, parseInboundSms } from "./parse.js";
 import { resolveFamily } from "./resolve-family.js";
@@ -67,7 +67,7 @@ export default defineEndpoint((router, { services, getSchema, logger, database }
     try {
       const schema = await getSchema();
       // 4. Resolve family.
-      const families: FamilyMatchRow[] = await new ItemsService("family", { schema, accountability: null })
+      const families: FamilyMatchRow[] = await new ItemsService(FAMILY_COLLECTION, { schema, accountability: null })
         .readByQuery({ fields: ["id", "family_admin_mobile", "family_sms_cc"], limit: -1 });
       const resolution = resolveFamily(sms.originationNumber, families);
       if (resolution.matchCount > 1) {

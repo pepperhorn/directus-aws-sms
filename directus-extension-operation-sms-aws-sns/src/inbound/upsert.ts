@@ -1,11 +1,5 @@
 // src/inbound/upsert.ts
-import { TICKET_COLLECTION, MESSAGE_COLLECTION } from "../constants.js";
 import type { InboundSms, FamilyResolution, UpsertDeps, UpsertResult } from "./types.js";
-
-// TICKET_COLLECTION / MESSAGE_COLLECTION are imported for callers that build the real
-// ItemsService instances (Task 5/6); the adapter itself operates on the injected deps.
-void TICKET_COLLECTION;
-void MESSAGE_COLLECTION;
 
 export async function upsertInbound(
   sms: InboundSms,
@@ -53,18 +47,38 @@ export async function upsertInbound(
   }
 
   // 3. Insert the inbound message keyed on the unique external_message_id.
-  await deps.messages.createOne({
-    ticket: ticketId,
-    direction: "inbound",
-    channel: "sms",
-    body: sms.messageBody,
-    from_identity: sms.originationNumber,
-    to_identity: sms.destinationNumber,
-    external_message_id: sms.inboundMessageId,
-    delivery_status: null,
-    raw: sms,
-    timestamp,
-  });
+  //    Guard against a race-condition unique-violation: if two DLQ retries arrive
+  //    concurrently, the pre-check (step 1) may both see no existing row, then one
+  //    createOne wins and the other throws a unique-constraint error. In that case,
+  //    re-read to confirm the duplicate exists and return a non-error result.
+  let messageId: string;
+  try {
+    messageId = await deps.messages.createOne({
+      ticket: ticketId,
+      direction: "inbound",
+      channel: "sms",
+      body: sms.messageBody,
+      from_identity: sms.originationNumber,
+      to_identity: sms.destinationNumber,
+      external_message_id: sms.inboundMessageId,
+      delivery_status: null,
+      raw: sms,
+      timestamp,
+    });
+  } catch (err) {
+    const dup = await deps.messages.readByQuery({
+      filter: { external_message_id: { _eq: sms.inboundMessageId } },
+      fields: ["id", "ticket"],
+      limit: 1,
+    });
+    if (dup.length > 0) {
+      return { ticketId: dup[0].ticket, messageCreated: false, ticketCreated };
+    }
+    throw err;
+  }
+
+  // Suppress unused-variable warning — messageId is assigned for correctness/future use.
+  void messageId;
 
   // 4. Bump last_message_at (skip the redundant write on a just-created ticket).
   if (!ticketCreated) {

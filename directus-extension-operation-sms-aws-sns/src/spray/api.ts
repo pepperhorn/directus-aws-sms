@@ -48,12 +48,25 @@ export default defineOperationApi<Options>({
 
     const results: SpraySendResult[] = [];
     for (const r of recipients) {
+      let sent: Awaited<ReturnType<typeof sendSms>>;
       try {
-        const sent = await sendSms(
+        sent = await sendSms(
           { to: r.to, message, origination: "senderId", smsType },
           config
         );
-        // Per-recipient audit row (Decision 2). our_identity = the Sender ID we sent from.
+      } catch (err) {
+        const e = err as { name?: string; message?: string };
+        const msg = `${e.name ?? "Error"}: ${e.message ?? String(err)}`;
+        logger.error(`Spray send failed for family ${r.familyId} (${r.to}): ${msg}`);
+        results.push({ familyId: r.familyId, to: r.to, status: "failed", error: msg });
+        continue;
+      }
+
+      // Send succeeded — record as "sent" regardless of whether the audit write works.
+      results.push({ familyId: r.familyId, to: r.to, status: "sent", messageId: sent.messageId });
+
+      // Per-recipient audit row (Decision 2). our_identity = the Sender ID we sent from.
+      try {
         await appendOutboundMessage(
           {
             externalIdentity: r.to,
@@ -64,12 +77,11 @@ export default defineOperationApi<Options>({
           },
           { items }
         );
-        results.push({ familyId: r.familyId, to: r.to, status: "sent", messageId: sent.messageId });
-      } catch (err) {
-        const e = err as { name?: string; message?: string };
-        const msg = `${e.name ?? "Error"}: ${e.message ?? String(err)}`;
-        logger.error(`Spray send failed for family ${r.familyId} (${r.to}): ${msg}`);
-        results.push({ familyId: r.familyId, to: r.to, status: "failed", error: msg });
+      } catch (auditErr) {
+        const ae = auditErr as { message?: string };
+        logger.warn(
+          `Spray: SMS delivered to family ${r.familyId} (messageId=${sent.messageId}) but audit row failed to write: ${ae.message ?? String(auditErr)}`
+        );
       }
     }
 
