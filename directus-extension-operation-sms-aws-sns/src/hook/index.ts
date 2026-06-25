@@ -49,6 +49,30 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
         if (!hasRelation(rel.collection, rel.field)) { await relationsService.createOne(rel); didWork = true; }
       }
       if (didWork) logger.info(`Created ticketing collections "${TICKET_COLLECTION}" / "${MESSAGE_COLLECTION}".`);
+
+      // Ensure a partial unique index that prevents two open tickets for the same conversation.
+      // Postgres and SQLite support partial unique indexes; MySQL does NOT — skip with a warn.
+      try {
+        const dbClient: string = (database as any)?.client?.config?.client ?? "";
+        if (/pg|postgres|sqlite/i.test(dbClient)) {
+          const indexName = "client_ticket_open_conversation_uq";
+          await (database as any).raw(
+            `CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${TICKET_COLLECTION} (external_identity, our_identity) WHERE status = 'open'`,
+          );
+          logger.info(`Ensured partial unique index "${indexName}" on "${TICKET_COLLECTION}".`);
+        } else {
+          logger.warn(
+            `SMS extension: skipping partial unique index on "${TICKET_COLLECTION}" — engine "${dbClient}" does not support partial indexes. ` +
+            `Without this index, concurrent new-conversation events could create duplicate open tickets.`,
+          );
+        }
+      } catch (idxErr) {
+        const idxMsg = idxErr instanceof Error ? idxErr.message : String(idxErr);
+        logger.warn(
+          `SMS extension: could not create partial unique index on "${TICKET_COLLECTION}" (${idxMsg}). ` +
+          `Without this index, concurrent new-conversation events could create duplicate open tickets.`,
+        );
+      }
     };
 
     try {

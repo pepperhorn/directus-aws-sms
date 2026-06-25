@@ -5,3 +5,7 @@ dist/
 .DS_Store
 .env
 .env.local
+
+# Local agent scratch (worktrees, subagent-driven-development ledger/briefs/reports)
+.claude/worktrees/
+.superpowers/

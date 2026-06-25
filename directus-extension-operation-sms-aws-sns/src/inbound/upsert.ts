@@ -35,15 +35,37 @@ export async function upsertInbound(
   if (open.length > 0) {
     ticketId = open[0].id;
   } else {
-    ticketId = await deps.tickets.createOne({
-      status: "open",
-      channel: "sms",
-      client: resolution.familyId, // null for 0/many matches (triage)
-      external_identity: sms.originationNumber,
-      our_identity: sms.destinationNumber,
-      last_message_at: timestamp,
-    });
-    ticketCreated = true;
+    // Guard against a race where two concurrent requests for the same NEW conversation
+    // both find no open ticket, then both attempt createOne. The DB partial unique index
+    // (client_ticket_open_conversation_uq) causes the loser to throw a unique-constraint
+    // error. Re-read the winner's ticket; if found, adopt it and continue without error.
+    try {
+      ticketId = await deps.tickets.createOne({
+        status: "open",
+        channel: "sms",
+        client: resolution.familyId, // null for 0/many matches (triage)
+        external_identity: sms.originationNumber,
+        our_identity: sms.destinationNumber,
+        last_message_at: timestamp,
+      });
+      ticketCreated = true;
+    } catch (ticketErr) {
+      const raced = await deps.tickets.readByQuery({
+        filter: {
+          external_identity: { _eq: sms.originationNumber },
+          our_identity: { _eq: sms.destinationNumber },
+          status: { _eq: "open" },
+        },
+        fields: ["id"],
+        limit: 1,
+      });
+      if (raced.length > 0) {
+        ticketId = raced[0].id;
+        ticketCreated = false;
+      } else {
+        throw ticketErr;
+      }
+    }
   }
 
   // 3. Insert the inbound message keyed on the unique external_message_id.

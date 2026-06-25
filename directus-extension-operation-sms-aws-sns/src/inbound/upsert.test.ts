@@ -158,4 +158,43 @@ describe("upsertInbound", () => {
     await upsertInbound(sms("in-1"), manyMatch, deps);
     expect(ticketRows[0].client).toBeNull();
   });
+
+  it("ticket create-conflict race: ticket createOne throws unique violation, re-reads winner's ticket, resolves without throw", async () => {
+    // Simulate two concurrent inbound events for the same brand-new conversation:
+    // - initial open-ticket readByQuery: miss (no open ticket yet)
+    // - ticket createOne: throws unique constraint (another request won the race)
+    // - follow-up open-ticket readByQuery: returns the winner's ticket
+    // Expected: resolves with ticketId = "t-raced", ticketCreated = false, no second createOne
+    let ticketReadCallCount = 0;
+    let ticketCreateCallCount = 0;
+
+    const tickets: ItemsLike = {
+      readByQuery: async (_q) => {
+        ticketReadCallCount++;
+        if (ticketReadCallCount === 1) return []; // initial open-ticket lookup: miss
+        return [{ id: "t-raced" }];               // post-conflict re-read: winner's ticket
+      },
+      createOne: async (_item) => {
+        ticketCreateCallCount++;
+        throw new Error(
+          `duplicate key value violates unique constraint "client_ticket_open_conversation_uq"`,
+        );
+      },
+      updateOne: async (id) => id,
+    };
+
+    const messages: ItemsLike = {
+      readByQuery: async () => [],
+      createOne: async (_item) => "m-new",
+      updateOne: async (id) => id,
+    };
+
+    const deps = { tickets, messages, now: () => "2026-06-25T00:00:00.000Z" };
+    const result = await upsertInbound(sms("in-race-ticket"), oneMatch, deps);
+
+    expect(result.ticketId).toBe("t-raced");
+    expect(result.ticketCreated).toBe(false);
+    expect(result.messageCreated).toBe(true);
+    expect(ticketCreateCallCount).toBe(1); // only one attempt, no retry loop
+  });
 });

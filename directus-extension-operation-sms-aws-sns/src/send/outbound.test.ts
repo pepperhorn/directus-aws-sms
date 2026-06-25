@@ -117,4 +117,52 @@ describe("appendOutboundMessage", () => {
     const res = await appendOutboundMessage(input, { items: h.items });
     expect(res.createdTicket).toBe(true);
   });
+
+  it("ticket create-conflict race: ticket createOne throws unique violation, re-reads winner's ticket, resolves without throw", async () => {
+    // Simulate two concurrent outbound sends for the same brand-new conversation:
+    // - initial open-ticket readByQuery: miss (no open ticket yet)
+    // - ticket createOne: throws unique constraint (another request won the race)
+    // - follow-up open-ticket readByQuery: returns the winner's ticket
+    // Expected: resolves with ticketId = "t-raced", createdTicket = false, no second createOne
+    let ticketReadCallCount = 0;
+    let ticketCreateCallCount = 0;
+
+    const ticketService: ItemsServiceLike = {
+      readByQuery: vi.fn(async (_q: any) => {
+        ticketReadCallCount++;
+        if (ticketReadCallCount === 1) return []; // initial open-ticket lookup: miss
+        return [{ id: "t-raced" }];               // post-conflict re-read: winner's ticket
+      }),
+      createOne: vi.fn(async (_item: any) => {
+        ticketCreateCallCount++;
+        throw new Error(
+          `duplicate key value violates unique constraint "client_ticket_open_conversation_uq"`,
+        );
+      }),
+      updateOne: vi.fn(async (id: any) => id),
+    };
+
+    const messages: any[] = [];
+    let messageSeq = 0;
+    const messageService: ItemsServiceLike = {
+      readByQuery: vi.fn(async () => messages),
+      createOne: vi.fn(async (item: any) => {
+        const id = `m${++messageSeq}`;
+        messages.push({ id, ...item });
+        return id;
+      }),
+      updateOne: vi.fn(async (id: any) => id),
+    };
+
+    const items = (collection: string): ItemsServiceLike =>
+      collection === "client_ticket" ? ticketService : messageService;
+
+    const res = await appendOutboundMessage(input, { items, now: () => "2026-06-25T00:00:00.000Z" });
+
+    expect(res.ticketId).toBe("t-raced");
+    expect(res.createdTicket).toBe(false);
+    expect(ticketCreateCallCount).toBe(1); // only one attempt, no retry loop
+    expect(messageService.createOne).toHaveBeenCalledTimes(1);
+    expect((messageService.createOne as any).mock.calls[0][0].ticket).toBe("t-raced");
+  });
 });
