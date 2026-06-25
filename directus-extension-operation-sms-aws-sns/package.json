@@ -26,6 +26,11 @@
         "type": "operation",
         "name": "sms-spray",
         "source": { "app": "src/spray/app.ts", "api": "src/spray/api.ts" }
+      },
+      {
+        "type": "endpoint",
+        "name": "sms-inbound",
+        "source": "src/inbound/index.ts"
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
