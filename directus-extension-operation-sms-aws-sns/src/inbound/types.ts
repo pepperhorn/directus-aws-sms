@@ -27,3 +27,21 @@ export type FamilyResolution = {
   familyId: string | null; // set only when exactly one match
   matchedFamilyIds: string[]; // all matches (for staff disambiguation when many)
 };
+
+export type ItemsLike = {
+  readByQuery(q: any): Promise<any[]>;
+  createOne(item: any): Promise<string>;
+  updateOne(id: string, patch: any): Promise<string>;
+};
+
+export type UpsertDeps = {
+  tickets: ItemsLike;
+  messages: ItemsLike;
+  now?: () => string;
+};
+
+export type UpsertResult = {
+  ticketId: string;
+  messageCreated: boolean;
+  ticketCreated: boolean;
+};
