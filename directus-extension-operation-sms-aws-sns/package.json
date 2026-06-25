@@ -16,9 +16,34 @@
         "type": "hook",
         "name": "sms-aws-sns-bootstrap",
         "source": "src/hook/index.ts"
+      },
+      {
+        "type": "operation",
+        "name": "sms-number-backfill",
+        "source": { "app": "src/backfill/app.ts", "api": "src/backfill/api.ts" }
+      },
+      {
+        "type": "operation",
+        "name": "sms-spray",
+        "source": { "app": "src/spray/app.ts", "api": "src/spray/api.ts" }
+      },
+      {
+        "type": "endpoint",
+        "name": "sms-inbound",
+        "source": "src/inbound/index.ts"
+      },
+      {
+        "type": "operation",
+        "name": "sms-dlq-drain",
+        "source": { "app": "src/drain/app.ts", "api": "src/drain/api.ts" }
+      },
+      {
+        "type": "operation",
+        "name": "sms-ticket-reply",
+        "source": { "app": "src/reply/app.ts", "api": "src/reply/api.ts" }
       }
     ],
-    "host": "^10.0.0 || ^11.0.0"
+    "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
   },
   "scripts": {
     "build": "directus-extension build",
@@ -28,7 +53,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aws-sdk/client-sns": "^3.700.0"
+    "@aws-sdk/client-sns": "^3.700.0",
+    "@aws-sdk/client-sqs": "^3.700.0",
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.700.0"
   },
   "devDependencies": {
     "@directus/extensions-sdk": "^12.0.0",

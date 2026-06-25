@@ -39,7 +39,24 @@ export default defineOperationApp({
           placeholder: "Your verification code is {{ trigger.payload.code }}",
         },
         required: true,
-        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically.",
+        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically on the Sender ID (spray) path only — not on the two-way number path.",
+      },
+    },
+    {
+      field: "origination",
+      name: "Origination",
+      type: "string",
+      schema: { default_value: "senderId" },
+      meta: {
+        width: "half",
+        interface: "select-dropdown",
+        options: {
+          choices: [
+            { text: "Sender ID (one-way, footer appended)", value: "senderId" },
+            { text: "Two-way number (replyable, no footer, logs a ticket message)", value: "number" },
+          ],
+        },
+        note: "Sender ID sends via Amazon SNS. Two-way number sends via AWS End User Messaging and appends an outbound message to the client ticket.",
       },
     },
     {

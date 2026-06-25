@@ -31,12 +31,14 @@ Set on the Directus host:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `AWS_REGION` | yes | e.g. `us-east-1`. |
-| `AWS_ACCESS_KEY_ID` | conditional | Required unless using SDK default credential chain (IAM role, profile). |
-| `AWS_SECRET_ACCESS_KEY` | conditional | Same as above. |
-| `AWS_SNS_SENDER_ID` | no | Honored only in countries that support alphanumeric Sender IDs. |
+| `SMS_AWS_REGION` | yes | e.g. `us-east-1`. |
+| `SMS_AWS_ACCESS_KEY_ID` | conditional | Required unless using SDK default credential chain (IAM role, profile). |
+| `SMS_AWS_SECRET_ACCESS_KEY` | conditional | Same as above. |
+| `SMS_AWS_SNS_SENDER_ID` | no | Honored only in countries that support alphanumeric Sender IDs. |
 
-Env vars take precedence over the settings collection per-key. You can mix: e.g. set `AWS_REGION` in env and store credentials in the settings page.
+These keys are prefixed with `SMS_` so they don't collide with other AWS services configured on the same Directus host. Env vars take precedence over the settings collection per-key. You can mix: e.g. set `SMS_AWS_REGION` in env and store credentials in the settings page.
+
+Note: only these explicit `SMS_AWS_*` keys are read by the extension. If you leave the credential keys unset, the AWS SDK's default credential chain (IAM role/profile, or the unprefixed `AWS_*` vars) still applies.
 
 IAM permission required: `sns:Publish`.
 
