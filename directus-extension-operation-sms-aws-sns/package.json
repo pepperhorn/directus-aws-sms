@@ -36,6 +36,11 @@
         "type": "operation",
         "name": "sms-dlq-drain",
         "source": { "app": "src/drain/app.ts", "api": "src/drain/api.ts" }
+      },
+      {
+        "type": "operation",
+        "name": "sms-ticket-reply",
+        "source": { "app": "src/reply/app.ts", "api": "src/reply/api.ts" }
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
