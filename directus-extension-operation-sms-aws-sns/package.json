@@ -31,6 +31,11 @@
         "type": "endpoint",
         "name": "sms-inbound",
         "source": "src/inbound/index.ts"
+      },
+      {
+        "type": "operation",
+        "name": "sms-dlq-drain",
+        "source": { "app": "src/drain/app.ts", "api": "src/drain/api.ts" }
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
@@ -44,6 +49,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sns": "^3.700.0",
+    "@aws-sdk/client-sqs": "^3.700.0",
     "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.700.0"
   },
   "devDependencies": {
