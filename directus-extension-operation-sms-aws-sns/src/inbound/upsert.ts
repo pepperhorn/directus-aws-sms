@@ -51,9 +51,8 @@ export async function upsertInbound(
   //    concurrently, the pre-check (step 1) may both see no existing row, then one
   //    createOne wins and the other throws a unique-constraint error. In that case,
   //    re-read to confirm the duplicate exists and return a non-error result.
-  let messageId: string;
   try {
-    messageId = await deps.messages.createOne({
+    await deps.messages.createOne({
       ticket: ticketId,
       direction: "inbound",
       channel: "sms",
@@ -76,9 +75,6 @@ export async function upsertInbound(
     }
     throw err;
   }
-
-  // Suppress unused-variable warning — messageId is assigned for correctness/future use.
-  void messageId;
 
   // 4. Bump last_message_at (skip the redundant write on a just-created ticket).
   if (!ticketCreated) {

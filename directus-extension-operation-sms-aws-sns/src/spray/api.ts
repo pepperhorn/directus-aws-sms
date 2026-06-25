@@ -1,6 +1,7 @@
 // src/spray/api.ts
 import { defineOperationApi } from "@directus/extensions-sdk";
 import { resolveAwsConfig } from "../config.js";
+import { FAMILY_COLLECTION } from "../constants.js";
 import { sendSms } from "../send/provider.js";
 import { appendOutboundMessage, type ItemsServiceLike } from "../send/outbound.js";
 import {
@@ -34,7 +35,7 @@ export default defineOperationApi<Options>({
 
     const { ItemsService } = services as any;
     const schema = await getSchema();
-    const families = new ItemsService("family", { schema, accountability });
+    const families = new ItemsService(FAMILY_COLLECTION, { schema, accountability });
 
     const rows: SprayFamilyRow[] = await families.readByQuery({
       fields: ["id", "family_sms_option", "family_admin_mobile"],
