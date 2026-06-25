@@ -31,9 +31,19 @@ export default defineOperationApi<Options>({
     // processOne mirrors the endpoint's Notification path, reusing the same upsert adapter.
     const processOne = async (snsBody: unknown): Promise<void> => {
       const envelope = parseSnsEnvelope(snsBody);
-      if (!envelope || envelope.Type !== "Notification") return; // non-notifications: nothing to do, delete
+      if (!envelope || envelope.Type !== "Notification") {
+        logger.warn(
+          `[sms-dlq-drain] Discarding DLQ message with non-Notification envelope (Type=${envelope?.Type ?? "unknown"}); message will be deleted.`
+        );
+        return; // non-notifications: nothing to do, delete
+      }
       const sms = parseInboundSms(envelope.Message);
-      if (!sms) return; // unprocessable payload: delete rather than loop forever
+      if (!sms) {
+        logger.warn(
+          "[sms-dlq-drain] Discarding DLQ message: inbound SMS payload could not be parsed; message will be deleted."
+        );
+        return; // unprocessable payload: delete rather than loop forever
+      }
       const schema = await getSchema();
       const families: FamilyMatchRow[] = await new ItemsService("family", { schema, accountability: null })
         .readByQuery({ fields: ["id", "family_admin_mobile", "family_sms_cc"], limit: -1 });
