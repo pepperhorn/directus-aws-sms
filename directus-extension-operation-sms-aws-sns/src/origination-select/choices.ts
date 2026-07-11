@@ -20,7 +20,7 @@ export function originationChoices(twoWayConfigured: boolean): OriginationChoice
     },
     {
       text: twoWayConfigured
-        ? "Two-way number (replyable, no footer, logs a ticket message)"
+        ? "Two-way number (replyable — no do-not-reply footer; logs a ticket message)"
         : "Two-way number — not configured (set a two-way number in SMS Settings)",
       value: "number",
       disabled: !twoWayConfigured,
