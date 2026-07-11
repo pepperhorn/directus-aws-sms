@@ -19,3 +19,17 @@ export function applyOrgSignature(message: string, signature?: string): string {
   if (message.startsWith(`${sig}: `)) return message;
   return `${sig}: ${message}`;
 }
+
+/**
+ * Append an org footer to a message body, e.g. `"See you at 3pm -- CRF Schools"`.
+ *
+ * No-op when `footer` is absent/blank, and idempotent so an already-footed body
+ * is not doubled.
+ */
+export function applyFooter(message: string, footer?: string): string {
+  const f = typeof footer === "string" ? footer.trim() : "";
+  if (f === "") return message;
+  const suffix = ` -- ${f}`;
+  if (message.endsWith(suffix)) return message;
+  return `${message}${suffix}`;
+}

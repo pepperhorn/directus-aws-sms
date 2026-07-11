@@ -8,6 +8,8 @@ export type AwsConfig = {
   twoWayNumber?: string;
   sprayNumber?: string;
   orgSignature?: string;
+  orgSignatureFirstOnly?: boolean;
+  orgFooter?: string;
 };
 
 type ResolveContext = {
@@ -23,6 +25,21 @@ const trimOrUndefined = (v: unknown): string | undefined => {
   return t.length === 0 ? undefined : t;
 };
 
+// Parse a boolean from an env string ("true"/"1"/"yes"/"on") or a settings
+// value (native boolean, or 1/0). Returns undefined when unset/unrecognized so
+// the env→settings fallback can chain.
+const boolOrUndefined = (v: unknown): boolean | undefined => {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  if (typeof v === "string") {
+    const t = v.trim().toLowerCase();
+    if (t === "") return undefined;
+    if (["true", "1", "yes", "on"].includes(t)) return true;
+    if (["false", "0", "no", "off"].includes(t)) return false;
+  }
+  return undefined;
+};
+
 export const resolveAwsConfig = async (
   ctx: ResolveContext
 ): Promise<AwsConfig> => {
@@ -34,6 +51,8 @@ export const resolveAwsConfig = async (
     twoWayNumber: trimOrUndefined(ctx.env.SMS_AWS_TWO_WAY_NUMBER),
     sprayNumber: trimOrUndefined(ctx.env.SMS_AWS_SPRAY_NUMBER),
     orgSignature: trimOrUndefined(ctx.env.SMS_AWS_ORG_SIGNATURE),
+    orgSignatureFirstOnly: boolOrUndefined(ctx.env.SMS_AWS_ORG_SIGNATURE_FIRST_ONLY),
+    orgFooter: trimOrUndefined(ctx.env.SMS_AWS_ORG_FOOTER),
   };
 
   const allEnvSet =
@@ -50,6 +69,8 @@ export const resolveAwsConfig = async (
     twoWayNumber?: string;
     sprayNumber?: string;
     orgSignature?: string;
+    orgSignatureFirstOnly?: boolean;
+    orgFooter?: string;
   } = {};
 
   if (!allEnvSet) {
@@ -68,6 +89,8 @@ export const resolveAwsConfig = async (
         twoWayNumber: trimOrUndefined((row as any).aws_two_way_number),
         sprayNumber: trimOrUndefined((row as any).aws_spray_number),
         orgSignature: trimOrUndefined((row as any).aws_org_signature),
+        orgSignatureFirstOnly: boolOrUndefined((row as any).aws_org_signature_first_only),
+        orgFooter: trimOrUndefined((row as any).aws_org_footer),
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -90,5 +113,7 @@ export const resolveAwsConfig = async (
     twoWayNumber: fromEnv.twoWayNumber ?? fromSettings.twoWayNumber,
     sprayNumber: fromEnv.sprayNumber ?? fromSettings.sprayNumber,
     orgSignature: fromEnv.orgSignature ?? fromSettings.orgSignature,
+    orgSignatureFirstOnly: fromEnv.orgSignatureFirstOnly ?? fromSettings.orgSignatureFirstOnly,
+    orgFooter: fromEnv.orgFooter ?? fromSettings.orgFooter,
   };
 };

@@ -16,6 +16,8 @@ export default defineHook(({ init }, { services, getSchema, logger, database }) 
       { field: "aws_two_way_number", type: "string", meta: { interface: "input", width: "half", note: "E.164 two-way number for conversational sends (AWS End User Messaging origination identity). Prefer SMS_AWS_TWO_WAY_NUMBER env var in production." } },
       { field: "aws_spray_number", type: "string", meta: { interface: "input", width: "half", note: "Optional E.164 number to pin bulk/spray (SNS) sends to a specific origination number. Prefer SMS_AWS_SPRAY_NUMBER env var in production." } },
       { field: "aws_org_signature", type: "string", meta: { interface: "input", width: "half", note: "Optional org name prefixed to two-way OUTREACH messages (e.g. \"CRF Schools\" → \"CRF Schools: ...\"), so recipients know who's texting from the bare long code. Replies are left unsigned. Prefer SMS_AWS_ORG_SIGNATURE env var in production." } },
+      { field: "aws_org_signature_first_only", type: "boolean", meta: { interface: "boolean", width: "half", note: "ON = prepend the org signature only on the FIRST message of a conversation (no open ticket yet). OFF = every outreach message. Prefer SMS_AWS_ORG_SIGNATURE_FIRST_ONLY env var in production.", options: { label: "First message of a conversation only" } }, schema: { default_value: false } },
+      { field: "aws_org_footer", type: "string", meta: { interface: "input", width: "half", note: "Optional footer appended to two-way OUTREACH messages (e.g. \"CRF Schools\" → \"... -- CRF Schools\"). Replies are left unfooted. Prefer SMS_AWS_ORG_FOOTER env var in production." } },
     ];
 
     const ensureSettings = async (schema: any) => {

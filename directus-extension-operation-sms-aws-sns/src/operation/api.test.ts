@@ -211,15 +211,20 @@ describe("operation.handler error path", () => {
 });
 
 // Fake ItemsService that serves BOTH the settings singleton and the ticket/message writes.
-const makeServicesWithTicketing = (settingsRow: Record<string, unknown> = {}) => {
+const makeServicesWithTicketing = (
+  settingsRow: Record<string, unknown> = {},
+  opts: { openTicket?: { id: string | number } } = {},
+) => {
   const created: { collection: string; item: any }[] = [];
+  const openTicket = opts.openTicket ?? null;
   class FakeItemsService {
     constructor(public collection: string, public _opts: unknown) {}
     async readSingleton() {
       return settingsRow;
     }
     async readByQuery() {
-      return []; // no open ticket → create path
+      // Present an existing open ticket only when the test asks for one.
+      return this.collection === "client_ticket" && openTicket ? [openTicket] : [];
     }
     async createOne(item: any) {
       created.push({ collection: this.collection, item });
@@ -306,6 +311,127 @@ describe("operation.handler — origination=number (conversational)", () => {
 
     const msg = created.find((x) => x.collection === "client_message");
     expect(msg!.item.body).toBe("CRF Schools: See you at 3pm");
+  });
+
+  it("appends the org footer to two-way messages (send + stored) when configured", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-ft" });
+    const { services, created } = makeServicesWithTicketing({
+      aws_region: "ap-southeast-2",
+      aws_two_way_number: "+61480000001",
+      aws_org_footer: "CRF Schools",
+    });
+    const c = {
+      env: {}, services, getSchema: async () => ({}) as any, accountability: null,
+      data: {}, database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "See you at 3pm", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    );
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("See you at 3pm -- CRF Schools");
+    const msg = created.find((x) => x.collection === "client_message");
+    expect(msg!.item.body).toBe("See you at 3pm -- CRF Schools");
+  });
+
+  it("combines signature (prefix) and footer (suffix) on two-way outreach", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-both" });
+    const { services } = makeServicesWithTicketing({
+      aws_region: "ap-southeast-2",
+      aws_two_way_number: "+61480000001",
+      aws_org_signature: "CRF Schools",
+      aws_org_footer: "Reply STOP to opt out",
+    });
+    const c = {
+      env: {}, services, getSchema: async () => ({}) as any, accountability: null,
+      data: {}, database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "See you at 3pm", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    );
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("CRF Schools: See you at 3pm -- Reply STOP to opt out");
+  });
+
+  it("first-only ON: signs when there is NO open ticket (first message)", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-first" });
+    const { services } = makeServicesWithTicketing({
+      aws_region: "ap-southeast-2",
+      aws_two_way_number: "+61480000001",
+      aws_org_signature: "CRF Schools",
+      aws_org_signature_first_only: true,
+    });
+    const c = {
+      env: {}, services, getSchema: async () => ({}) as any, accountability: null,
+      data: {}, database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "Hi there", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    );
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("CRF Schools: Hi there");
+  });
+
+  it("first-only ON: does NOT sign when an open ticket already exists", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-cont" });
+    const { services } = makeServicesWithTicketing(
+      {
+        aws_region: "ap-southeast-2",
+        aws_two_way_number: "+61480000001",
+        aws_org_signature: "CRF Schools",
+        aws_org_signature_first_only: true,
+      },
+      { openTicket: { id: "t-existing" } },
+    );
+    const c = {
+      env: {}, services, getSchema: async () => ({}) as any, accountability: null,
+      data: {}, database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "Follow up", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    );
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("Follow up");
+  });
+
+  it("first-only OFF (default): signs every outreach even with an open ticket", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-every" });
+    const { services } = makeServicesWithTicketing(
+      {
+        aws_region: "ap-southeast-2",
+        aws_two_way_number: "+61480000001",
+        aws_org_signature: "CRF Schools",
+      },
+      { openTicket: { id: "t-existing" } },
+    );
+    const c = {
+      env: {}, services, getSchema: async () => ({}) as any, accountability: null,
+      data: {}, database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "Reminder", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    );
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("CRF Schools: Reminder");
   });
 
   it("does NOT apply the org signature on the senderId path", async () => {
