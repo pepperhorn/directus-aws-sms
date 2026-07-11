@@ -41,6 +41,11 @@
         "type": "operation",
         "name": "sms-ticket-reply",
         "source": { "app": "src/reply/app.ts", "api": "src/reply/api.ts" }
+      },
+      {
+        "type": "interface",
+        "name": "sms-origination-select",
+        "source": "src/origination-select/index.ts"
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"

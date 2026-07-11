@@ -22,6 +22,9 @@ In crf-admin: open the **SMS Settings** singleton from the Content module sideba
 - **AWS Access Key ID**
 - **AWS Secret Access Key** (masked input)
 - **AWS SNS Sender ID** (optional)
+- **AWS Two-Way Number** (optional) — E.164 number for conversational sends (AWS End User Messaging origination identity)
+- **AWS Spray Number** (optional) — E.164 number to pin bulk/spray (SNS) sends to a specific origination number
+- **AWS Org Signature** (optional) — org name prefixed to two-way *outreach* messages (e.g. `CRF Schools` → `CRF Schools: ...`); replies are left unsigned
 
 > ⚠️ **Security:** values are stored plaintext in your Directus database. Anyone with admin DB or API access can read them, and they appear in DB backups. Prefer Option B for production.
 
@@ -35,12 +38,15 @@ Set on the Directus host:
 | `SMS_AWS_ACCESS_KEY_ID` | conditional | Required unless using SDK default credential chain (IAM role, profile). |
 | `SMS_AWS_SECRET_ACCESS_KEY` | conditional | Same as above. |
 | `SMS_AWS_SNS_SENDER_ID` | no | Honored only in countries that support alphanumeric Sender IDs. |
+| `SMS_AWS_TWO_WAY_NUMBER` | no | E.164 number for conversational sends (AWS End User Messaging origination identity). Falls back to the `aws_two_way_number` settings field. |
+| `SMS_AWS_SPRAY_NUMBER` | no | E.164 number to pin bulk/spray (SNS) sends to a specific origination number instead of letting AWS auto-select. Falls back to the `aws_spray_number` settings field. |
+| `SMS_AWS_ORG_SIGNATURE` | no | Org name prefixed to two-way *outreach* messages (Send SMS operation, `origination: number`) so recipients know who is texting from the bare long code. Replies (`sms-ticket-reply`) are left unsigned. Falls back to the `aws_org_signature` settings field. |
 
 These keys are prefixed with `SMS_` so they don't collide with other AWS services configured on the same Directus host. Env vars take precedence over the settings collection per-key. You can mix: e.g. set `SMS_AWS_REGION` in env and store credentials in the settings page.
 
 Note: only these explicit `SMS_AWS_*` keys are read by the extension. If you leave the credential keys unset, the AWS SDK's default credential chain (IAM role/profile, or the unprefixed `AWS_*` vars) still applies.
 
-IAM permission required: `sns:Publish`.
+IAM permissions required: `sns:Publish` (Sender ID / spray path). The two-way number path (`origination: number`, and the ticket-reply action) additionally requires `sms-voice:SendTextMessage` — without it, two-way sends fail with `AccessDeniedException`.
 
 ## Operation options
 

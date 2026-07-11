@@ -6,6 +6,8 @@ export type AwsConfig = {
   secretAccessKey?: string;
   senderId?: string;
   twoWayNumber?: string;
+  sprayNumber?: string;
+  orgSignature?: string;
 };
 
 type ResolveContext = {
@@ -30,6 +32,8 @@ export const resolveAwsConfig = async (
     secretAccessKey: trimOrUndefined(ctx.env.SMS_AWS_SECRET_ACCESS_KEY),
     senderId: trimOrUndefined(ctx.env.SMS_AWS_SNS_SENDER_ID),
     twoWayNumber: trimOrUndefined(ctx.env.SMS_AWS_TWO_WAY_NUMBER),
+    sprayNumber: trimOrUndefined(ctx.env.SMS_AWS_SPRAY_NUMBER),
+    orgSignature: trimOrUndefined(ctx.env.SMS_AWS_ORG_SIGNATURE),
   };
 
   const allEnvSet =
@@ -44,6 +48,8 @@ export const resolveAwsConfig = async (
     secretAccessKey?: string;
     senderId?: string;
     twoWayNumber?: string;
+    sprayNumber?: string;
+    orgSignature?: string;
   } = {};
 
   if (!allEnvSet) {
@@ -60,6 +66,8 @@ export const resolveAwsConfig = async (
         secretAccessKey: trimOrUndefined((row as any).aws_secret_access_key),
         senderId: trimOrUndefined((row as any).aws_sns_sender_id),
         twoWayNumber: trimOrUndefined((row as any).aws_two_way_number),
+        sprayNumber: trimOrUndefined((row as any).aws_spray_number),
+        orgSignature: trimOrUndefined((row as any).aws_org_signature),
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -80,5 +88,7 @@ export const resolveAwsConfig = async (
     secretAccessKey: fromEnv.secretAccessKey ?? fromSettings.secretAccessKey,
     senderId: fromEnv.senderId ?? fromSettings.senderId,
     twoWayNumber: fromEnv.twoWayNumber ?? fromSettings.twoWayNumber,
+    sprayNumber: fromEnv.sprayNumber ?? fromSettings.sprayNumber,
+    orgSignature: fromEnv.orgSignature ?? fromSettings.orgSignature,
   };
 };

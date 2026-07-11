@@ -8,8 +8,8 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 20
 const certPem = publicKey.export({ type: "spki", format: "pem" }).toString();
 const CERT_URL = "https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-abc123.pem";
 
-const signWith = (stringToSign: string): string => {
-  const signer = createSign("RSA-SHA1");
+const signWith = (stringToSign: string, algorithm = "RSA-SHA1"): string => {
+  const signer = createSign(algorithm);
   signer.update(stringToSign, "utf8");
   return signer.sign(privateKey, "base64");
 };
@@ -90,8 +90,18 @@ describe("verifySnsSignature", () => {
     expect(await verifySnsSignature(signed, { fetchCert: spyFetch })).toBe(false);
     expect(fetched).toBe(false);
   });
-  it("rejects an unsupported SignatureVersion", async () => {
+  it("accepts a correctly signed v2 (SHA256) Notification", async () => {
     const msg = { ...baseNotification(), SignatureVersion: "2" };
+    const signed = { ...msg, Signature: signWith(buildStringToSign(msg), "RSA-SHA256") };
+    expect(await verifySnsSignature(signed, { fetchCert })).toBe(true);
+  });
+  it("rejects a v2 message signed with the wrong (SHA1) digest", async () => {
+    const msg = { ...baseNotification(), SignatureVersion: "2" };
+    const signed = { ...msg, Signature: signWith(buildStringToSign(msg), "RSA-SHA1") };
+    expect(await verifySnsSignature(signed, { fetchCert })).toBe(false);
+  });
+  it("rejects an unsupported SignatureVersion", async () => {
+    const msg = { ...baseNotification(), SignatureVersion: "3" };
     const signed = { ...msg, Signature: signWith(buildStringToSign(msg)) };
     expect(await verifySnsSignature(signed, { fetchCert })).toBe(false);
   });

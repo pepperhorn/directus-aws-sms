@@ -42,8 +42,13 @@ export function buildStringToSign(msg: SnsMessage): string {
   return out;
 }
 
+// SNS signs v1 messages with SHA1 and v2 messages with SHA256. AWS defaults new
+// topics to SignatureVersion 2 and is deprecating SHA1, so we accept both.
+const DIGEST_BY_VERSION: Record<string, string> = { "1": "RSA-SHA1", "2": "RSA-SHA256" };
+
 export async function verifySnsSignature(msg: SnsMessage, deps: VerifyDeps): Promise<boolean> {
-  if (String(msg.SignatureVersion ?? "") !== "1") return false;
+  const algorithm = DIGEST_BY_VERSION[String(msg.SignatureVersion ?? "")];
+  if (!algorithm) return false;
 
   const signature = msg.Signature;
   if (typeof signature !== "string" || signature.length === 0) return false;
@@ -62,7 +67,7 @@ export async function verifySnsSignature(msg: SnsMessage, deps: VerifyDeps): Pro
   }
 
   try {
-    const verifier = createVerify("RSA-SHA1");
+    const verifier = createVerify(algorithm);
     verifier.update(stringToSign, "utf8");
     return verifier.verify(certPem, signature, "base64");
   } catch {

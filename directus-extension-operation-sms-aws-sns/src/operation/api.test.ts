@@ -279,6 +279,61 @@ describe("operation.handler — origination=number (conversational)", () => {
     expect(snsMock.commandCalls(PublishCommand)).toHaveLength(0);
   });
 
+  it("prepends the org signature to the two-way body (send + stored message) when configured", async () => {
+    pinpointMock.on(SendTextMessageCommand).resolves({ MessageId: "eum-sig" });
+    const { services, created } = makeServicesWithTicketing({
+      aws_region: "ap-southeast-2",
+      aws_two_way_number: "+61480000001",
+      aws_org_signature: "CRF Schools",
+    });
+    const c = {
+      env: {},
+      services,
+      getSchema: async () => ({}) as any,
+      accountability: null,
+      data: {},
+      database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "See you at 3pm", smsType: "Transactional", origination: "number" } as any,
+      c as any,
+    );
+
+    const input = pinpointMock.commandCalls(SendTextMessageCommand)[0]!.args[0].input;
+    expect(input.MessageBody).toBe("CRF Schools: See you at 3pm");
+
+    const msg = created.find((x) => x.collection === "client_message");
+    expect(msg!.item.body).toBe("CRF Schools: See you at 3pm");
+  });
+
+  it("does NOT apply the org signature on the senderId path", async () => {
+    snsMock.on(PublishCommand).resolves({ MessageId: "sns-sig" });
+    const { services } = makeServicesWithTicketing({
+      aws_region: "ap-southeast-2",
+      aws_org_signature: "CRF Schools",
+    });
+    const c = {
+      env: {},
+      services,
+      getSchema: async () => ({}) as any,
+      accountability: null,
+      data: {},
+      database: {} as any,
+      logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} } as any,
+    };
+
+    await operation.handler(
+      { to: "+61400000001", message: "Blast", smsType: "Promotional" } as any,
+      c as any,
+    );
+
+    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
+    expect(input.Message).toBe("Blast\n\n(do not reply)");
+    expect(input.Message).not.toContain("CRF Schools");
+  });
+
   it("defaults to senderId (footer appended, no client_message) when origination is omitted", async () => {
     snsMock.on(PublishCommand).resolves({ MessageId: "sns-default" });
     const { services, created } = makeServicesWithTicketing({ aws_region: "ap-southeast-2" });

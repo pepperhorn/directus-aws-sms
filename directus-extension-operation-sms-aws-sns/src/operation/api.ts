@@ -2,6 +2,7 @@ import { defineOperationApi } from "@directus/extensions-sdk";
 import { resolveAwsConfig } from "../config.js";
 import { sendSms, type Origination } from "../send/provider.js";
 import { appendOutboundMessage, type ItemsServiceLike } from "../send/outbound.js";
+import { applyOrgSignature } from "../send/signature.js";
 
 export type Options = {
   to: string;
@@ -34,9 +35,16 @@ export default defineOperationApi<Options>({
       accountability,
     });
 
+    // Two-way outreach originates from the bare long code (no alphanumeric Sender
+    // ID possible), so the org identity is carried in the message text. Replies
+    // (reply/api.ts) are intentionally left unsigned. The senderId/spray path
+    // already brands via the Sender ID, so it is never signed here.
+    const outgoing =
+      route === "number" ? applyOrgSignature(message, config.orgSignature) : message;
+
     let sent;
     try {
-      sent = await sendSms({ to, message, origination: route, smsType }, config);
+      sent = await sendSms({ to, message: outgoing, origination: route, smsType }, config);
     } catch (err) {
       const e = err as { name?: string; message?: string };
       logger.error(
@@ -61,7 +69,7 @@ export default defineOperationApi<Options>({
         {
           externalIdentity: sent.to,
           ourIdentity: sent.from,
-          body: message,
+          body: outgoing,
           externalMessageId: sent.messageId,
         },
         { items }
