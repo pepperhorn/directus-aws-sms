@@ -34,12 +34,12 @@ export default defineOperationApp({
       type: "text",
       meta: {
         width: "full",
-        interface: "input-multiline",
+        interface: "sms-message-meter",
         options: {
           placeholder: "Your verification code is {{ trigger.payload.code }}",
         },
         required: true,
-        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically on the Sender ID (spray) path only — not on the two-way number path.",
+        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically on the Sender ID (spray) path only — not on the two-way number path. The counter below warns when the message (incl. signature/footer) exceeds one SMS.",
       },
     },
     {

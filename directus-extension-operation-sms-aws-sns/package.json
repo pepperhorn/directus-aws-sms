@@ -46,6 +46,11 @@
         "type": "interface",
         "name": "sms-origination-select",
         "source": "src/origination-select/index.ts"
+      },
+      {
+        "type": "interface",
+        "name": "sms-message-meter",
+        "source": "src/message-meter/index.ts"
       }
     ],
     "host": "^10.0.0 || ^11.0.0 || ^12.0.0"
