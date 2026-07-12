@@ -39,9 +39,21 @@ export default defineEndpoint((router, { services, getSchema, logger, database }
     }
 
     // 1. SECURITY BOUNDARY: verify the SNS signature before any side effect.
-    const verified = await verifySnsSignature(msg, { fetchCert: fetchText });
+    let failReason = "";
+    const verified = await verifySnsSignature(msg, {
+      fetchCert: fetchText,
+      onFailure: (reason) => {
+        failReason = reason;
+      },
+    });
     if (!verified) {
-      logger.warn("SMS inbound: SNS signature verification FAILED, rejecting.");
+      logger.warn(
+        `SMS inbound: SNS signature verification FAILED (${failReason}; Type=${String(
+          (msg as any).Type,
+        )}, SignatureVersion=${String((msg as any).SignatureVersion)}, SigningCertURL=${String(
+          (msg as any).SigningCertURL,
+        )}), rejecting.`,
+      );
       return res.status(403).send("forbidden");
     }
 

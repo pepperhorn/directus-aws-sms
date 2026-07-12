@@ -105,4 +105,25 @@ describe("verifySnsSignature", () => {
     const signed = { ...msg, Signature: signWith(buildStringToSign(msg)) };
     expect(await verifySnsSignature(signed, { fetchCert })).toBe(false);
   });
+  it("reports a specific failure reason via onFailure", async () => {
+    const reasons: string[] = [];
+    const onFailure = (r: string) => reasons.push(r);
+
+    // signature mismatch
+    const msg = baseNotification();
+    const tampered = { ...msg, Signature: signWith(buildStringToSign(msg)), Message: "tampered" };
+    await verifySnsSignature(tampered, { fetchCert, onFailure });
+    expect(reasons.some((r) => /signature mismatch/i.test(r))).toBe(true);
+
+    // cert fetch failure
+    reasons.length = 0;
+    const signed = { ...msg, Signature: signWith(buildStringToSign(msg)) };
+    await verifySnsSignature(signed, {
+      fetchCert: async () => {
+        throw new Error("ETIMEDOUT");
+      },
+      onFailure,
+    });
+    expect(reasons.some((r) => /cert fetch failed.*ETIMEDOUT/i.test(r))).toBe(true);
+  });
 });
