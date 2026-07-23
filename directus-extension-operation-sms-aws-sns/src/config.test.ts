@@ -223,3 +223,132 @@ describe("resolveAwsConfig — two-way number", () => {
     expect(cfg.twoWayNumber).toBeUndefined();
   });
 });
+
+describe("resolveAwsConfig — spray number", () => {
+  const makeCtx = (env: Record<string, string | undefined>, settingsRow: Record<string, unknown> = {}) => ({
+    env,
+    services: {
+      ItemsService: class {
+        constructor(public collection: string, public _opts: unknown) {}
+        async readSingleton() {
+          return settingsRow;
+        }
+      },
+    } as any,
+    getSchema: async () => ({}) as any,
+    accountability: null,
+  });
+
+  it("reads aws_spray_number from settings when env is unset", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx({}, { aws_region: "ap-southeast-2", aws_spray_number: "+61480000002" }),
+    );
+    expect(cfg.sprayNumber).toBe("+61480000002");
+  });
+
+  it("SMS_AWS_SPRAY_NUMBER env overrides the settings value", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx(
+        { SMS_AWS_REGION: "ap-southeast-2", SMS_AWS_SPRAY_NUMBER: "+61480000888" },
+        { aws_region: "ap-southeast-2", aws_spray_number: "+61480000002" },
+      ),
+    );
+    expect(cfg.sprayNumber).toBe("+61480000888");
+  });
+
+  it("leaves sprayNumber undefined when configured nowhere", async () => {
+    const cfg = await resolveAwsConfig(makeCtx({ SMS_AWS_REGION: "ap-southeast-2" }, { aws_region: "ap-southeast-2" }));
+    expect(cfg.sprayNumber).toBeUndefined();
+  });
+});
+
+describe("resolveAwsConfig — org signature", () => {
+  const makeCtx = (env: Record<string, string | undefined>, settingsRow: Record<string, unknown> = {}) => ({
+    env,
+    services: {
+      ItemsService: class {
+        constructor(public collection: string, public _opts: unknown) {}
+        async readSingleton() {
+          return settingsRow;
+        }
+      },
+    } as any,
+    getSchema: async () => ({}) as any,
+    accountability: null,
+  });
+
+  it("reads aws_org_signature from settings when env is unset", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx({}, { aws_region: "ap-southeast-2", aws_org_signature: "CRF Schools" }),
+    );
+    expect(cfg.orgSignature).toBe("CRF Schools");
+  });
+
+  it("SMS_AWS_ORG_SIGNATURE env overrides the settings value", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx(
+        { SMS_AWS_REGION: "ap-southeast-2", SMS_AWS_ORG_SIGNATURE: "CRF" },
+        { aws_region: "ap-southeast-2", aws_org_signature: "CRF Schools" },
+      ),
+    );
+    expect(cfg.orgSignature).toBe("CRF");
+  });
+
+  it("leaves orgSignature undefined when configured nowhere", async () => {
+    const cfg = await resolveAwsConfig(makeCtx({ SMS_AWS_REGION: "ap-southeast-2" }, { aws_region: "ap-southeast-2" }));
+    expect(cfg.orgSignature).toBeUndefined();
+  });
+});
+
+describe("resolveAwsConfig — org signature first-only toggle + footer", () => {
+  const makeCtx = (env: Record<string, string | undefined>, settingsRow: Record<string, unknown> = {}) => ({
+    env,
+    services: {
+      ItemsService: class {
+        constructor(public collection: string, public _opts: unknown) {}
+        async readSingleton() {
+          return settingsRow;
+        }
+      },
+    } as any,
+    getSchema: async () => ({}) as any,
+    accountability: null,
+  });
+
+  it("reads aws_org_signature_first_only boolean from settings", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx({}, { aws_region: "ap-southeast-2", aws_org_signature_first_only: true }),
+    );
+    expect(cfg.orgSignatureFirstOnly).toBe(true);
+  });
+
+  it("parses SMS_AWS_ORG_SIGNATURE_FIRST_ONLY env string and overrides settings", async () => {
+    const cfg = await resolveAwsConfig(
+      makeCtx(
+        { SMS_AWS_REGION: "ap-southeast-2", SMS_AWS_ORG_SIGNATURE_FIRST_ONLY: "true" },
+        { aws_region: "ap-southeast-2", aws_org_signature_first_only: false },
+      ),
+    );
+    expect(cfg.orgSignatureFirstOnly).toBe(true);
+  });
+
+  it("leaves orgSignatureFirstOnly undefined when set nowhere", async () => {
+    const cfg = await resolveAwsConfig(makeCtx({ SMS_AWS_REGION: "ap-southeast-2" }, { aws_region: "ap-southeast-2" }));
+    expect(cfg.orgSignatureFirstOnly).toBeUndefined();
+  });
+
+  it("reads aws_org_footer from settings; env overrides", async () => {
+    const fromSettings = await resolveAwsConfig(
+      makeCtx({}, { aws_region: "ap-southeast-2", aws_org_footer: "CRF Schools" }),
+    );
+    expect(fromSettings.orgFooter).toBe("CRF Schools");
+
+    const envWins = await resolveAwsConfig(
+      makeCtx(
+        { SMS_AWS_REGION: "ap-southeast-2", SMS_AWS_ORG_FOOTER: "CRF" },
+        { aws_region: "ap-southeast-2", aws_org_footer: "CRF Schools" },
+      ),
+    );
+    expect(envWins.orgFooter).toBe("CRF");
+  });
+});

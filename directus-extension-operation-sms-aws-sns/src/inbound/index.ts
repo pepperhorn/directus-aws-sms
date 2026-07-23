@@ -14,11 +14,40 @@ const fetchText = async (url: string): Promise<string> => {
   return res.text();
 };
 
+// SNS posts its JSON payload with Content-Type: text/plain. Directus' global JSON
+// body-parser only handles application/json, so it SKIPS the SNS body and leaves
+// req.body as an empty {} — which would sail into signature verification with every
+// field undefined. When the body arrives empty, read the raw request stream ourselves
+// so the handler sees the real payload. If an upstream parser already produced a usable
+// body (Buffer / string / non-empty object), leave it untouched.
+const readSnsBody = (req: any, _res: any, next: (err?: unknown) => void): void => {
+  const body = req.body;
+  const alreadyUsable =
+    Buffer.isBuffer(body) ||
+    typeof body === "string" ||
+    (body !== null && typeof body === "object" && Object.keys(body).length > 0);
+  if (alreadyUsable) {
+    next();
+    return;
+  }
+  let data = "";
+  req.setEncoding("utf8");
+  req.on("data", (chunk: string) => {
+    data += chunk;
+  });
+  req.on("end", () => {
+    req.body = data;
+    next();
+  });
+  req.on("error", (err: unknown) => next(err));
+};
+
 export default defineEndpoint((router, { services, getSchema, logger, database }) => {
   const { ItemsService } = services as any;
 
-  // express.json() may already have parsed the body; SNS posts text/plain, so accept both.
-  router.post("/", async (req: any, res: any) => {
+  // readSnsBody restores the raw text/plain body Directus' JSON parser drops; the block
+  // below then accepts a raw string, a Buffer, or an already-parsed object.
+  router.post("/", readSnsBody, async (req: any, res: any) => {
     let msg: SnsMessage;
     try {
       let raw: unknown;
@@ -39,9 +68,21 @@ export default defineEndpoint((router, { services, getSchema, logger, database }
     }
 
     // 1. SECURITY BOUNDARY: verify the SNS signature before any side effect.
-    const verified = await verifySnsSignature(msg, { fetchCert: fetchText });
+    let failReason = "";
+    const verified = await verifySnsSignature(msg, {
+      fetchCert: fetchText,
+      onFailure: (reason) => {
+        failReason = reason;
+      },
+    });
     if (!verified) {
-      logger.warn("SMS inbound: SNS signature verification FAILED, rejecting.");
+      logger.warn(
+        `SMS inbound: SNS signature verification FAILED (${failReason}; Type=${String(
+          (msg as any).Type,
+        )}, SignatureVersion=${String((msg as any).SignatureVersion)}, SigningCertURL=${String(
+          (msg as any).SigningCertURL,
+        )}), rejecting.`,
+      );
       return res.status(403).send("forbidden");
     }
 
