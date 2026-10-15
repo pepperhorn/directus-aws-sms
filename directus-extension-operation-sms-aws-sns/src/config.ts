@@ -49,9 +49,12 @@ export const resolveAwsConfig = async (
   if (!allEnvSet) {
     try {
       const schema = await ctx.getSchema();
+      // Read as system (accountability: null), not as the caller. sms_settings holds
+      // the AWS secret key; this is an internal config read whose values are never
+      // returned to the caller, so callers must not need (or be granted) read on it.
       const items = new ctx.services.ItemsService(SETTINGS_COLLECTION, {
         schema,
-        accountability: ctx.accountability,
+        accountability: null,
       });
       const row = (await items.readSingleton({})) ?? {};
       fromSettings = {
