@@ -184,6 +184,31 @@ describe("resolveAwsConfig", () => {
 
     expect(capturedCollection).toBe(SETTINGS_COLLECTION);
   });
+
+  it("reads settings as system (accountability: null), not as the caller", async () => {
+    // sms_settings holds AWS secrets. Reading it with the caller's accountability
+    // forced every non-admin token that triggers an SMS flow to be granted read on
+    // it. The read is internal config and never returned to the caller.
+    let capturedOpts: any;
+    class CaptureItemsService {
+      constructor(public collection: string, opts: unknown) {
+        capturedOpts = opts;
+      }
+      readSingleton = async () => ({ aws_region: "us-east-1" });
+    }
+    const services = { ItemsService: CaptureItemsService } as any;
+    const callerAccountability = { user: "u-1", role: "r-1", admin: false };
+
+    await resolveAwsConfig({
+      env: {},
+      services,
+      getSchema: async () => ({}) as any,
+      accountability: callerAccountability,
+    });
+
+    expect(capturedOpts).toBeDefined();
+    expect(capturedOpts.accountability).toBeNull();
+  });
 });
 
 describe("resolveAwsConfig — two-way number", () => {
