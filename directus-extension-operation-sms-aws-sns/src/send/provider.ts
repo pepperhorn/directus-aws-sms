@@ -74,10 +74,13 @@ export async function sendSms(
   if (config.senderId) {
     messageAttributes["AWS.SNS.SMS.SenderID"] = { DataType: "String", StringValue: config.senderId };
   }
+  if (config.sprayNumber) {
+    messageAttributes["AWS.MM.SMS.OriginationNumber"] = { DataType: "String", StringValue: config.sprayNumber };
+  }
 
   const client = new SNSClient({ region: config.region, ...(credentials ? { credentials } : {}) });
   const result = await client.send(
     new PublishCommand({ PhoneNumber: to, Message: finalMessage, MessageAttributes: messageAttributes }),
   );
-  return { messageId: result.MessageId ?? "", to, from: config.senderId ?? "", origination };
+  return { messageId: result.MessageId ?? "", to, from: config.sprayNumber ?? config.senderId ?? "", origination };
 }

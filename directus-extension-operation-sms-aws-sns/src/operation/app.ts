@@ -34,12 +34,12 @@ export default defineOperationApp({
       type: "text",
       meta: {
         width: "full",
-        interface: "input-multiline",
+        interface: "sms-message-meter",
         options: {
           placeholder: "Your verification code is {{ trigger.payload.code }}",
         },
         required: true,
-        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically on the Sender ID (spray) path only — not on the two-way number path.",
+        note: "SMS body. Supports {{ }} template variables. A (do not reply) footer is appended automatically on the Sender ID (spray) path only — not on the two-way number path. The counter below warns when the message (incl. signature/footer) exceeds one SMS.",
       },
     },
     {
@@ -49,14 +49,8 @@ export default defineOperationApp({
       schema: { default_value: "senderId" },
       meta: {
         width: "half",
-        interface: "select-dropdown",
-        options: {
-          choices: [
-            { text: "Sender ID (one-way, footer appended)", value: "senderId" },
-            { text: "Two-way number (replyable, no footer, logs a ticket message)", value: "number" },
-          ],
-        },
-        note: "Sender ID sends via Amazon SNS. Two-way number sends via AWS End User Messaging and appends an outbound message to the client ticket.",
+        interface: "sms-origination-select",
+        note: "Sender ID sends via Amazon SNS. Two-way number sends via AWS End User Messaging and appends an outbound message to the client ticket. The two-way option is disabled until a two-way number is set in SMS Settings.",
       },
     },
     {

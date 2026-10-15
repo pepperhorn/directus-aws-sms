@@ -50,6 +50,34 @@ describe("sendSms — senderId (spray) path", () => {
     const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
     expect(input.MessageAttributes!["AWS.SNS.SMS.SMSType"]).toEqual({ DataType: "String", StringValue: "Transactional" });
   });
+
+  it("pins the origination number when config.sprayNumber is set, and records it as `from`", async () => {
+    snsMock.on(PublishCommand).resolves({ MessageId: "sns-3" });
+
+    const result = await sendSms(
+      { to: "+61400000001", message: "hi", origination: "senderId" },
+      { ...baseConfig, sprayNumber: "+61480000002" },
+    );
+
+    expect(result.from).toBe("+61480000002");
+    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
+    expect(input.MessageAttributes!["AWS.MM.SMS.OriginationNumber"]).toEqual({ DataType: "String", StringValue: "+61480000002" });
+    // sprayNumber and senderId coexist: both attributes are present.
+    expect(input.MessageAttributes!["AWS.SNS.SMS.SenderID"]).toEqual({ DataType: "String", StringValue: "CRF-Schools" });
+  });
+
+  it("omits the OriginationNumber attribute when config.sprayNumber is unset", async () => {
+    snsMock.on(PublishCommand).resolves({ MessageId: "sns-4" });
+
+    const result = await sendSms(
+      { to: "+61400000001", message: "hi", origination: "senderId" },
+      { ...baseConfig, sprayNumber: undefined },
+    );
+
+    expect(result.from).toBe("CRF-Schools");
+    const input = snsMock.commandCalls(PublishCommand)[0]!.args[0].input;
+    expect(input.MessageAttributes!["AWS.MM.SMS.OriginationNumber"]).toBeUndefined();
+  });
 });
 
 describe("sendSms — number (conversational) path", () => {

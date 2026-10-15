@@ -32,6 +32,28 @@ export type AppendOutboundResult = {
  * insert an `outbound` client_message keyed on the provider message id, and bump last_message_at.
  * Used by the send operation (origination=number) and by Plan 3's reply action.
  */
+/**
+ * True when an OPEN client_ticket already exists for (external_identity,
+ * our_identity) — i.e. this send is continuing a conversation rather than
+ * starting one. Used by the outreach path to decide whether an org signature
+ * should be prepended when "first message only" mode is on.
+ */
+export async function hasOpenTicket(
+  items: (collection: string) => ItemsServiceLike,
+  externalIdentity: string,
+  ourIdentity: string,
+): Promise<boolean> {
+  const open = await items(TICKET_COLLECTION).readByQuery({
+    filter: {
+      external_identity: { _eq: externalIdentity },
+      our_identity: { _eq: ourIdentity },
+      status: { _eq: "open" },
+    },
+    limit: 1,
+  });
+  return Array.isArray(open) && open.length > 0;
+}
+
 export async function appendOutboundMessage(
   input: AppendOutboundInput,
   deps: AppendOutboundDeps,
